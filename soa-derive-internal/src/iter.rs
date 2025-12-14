@@ -235,10 +235,12 @@ pub fn derive(input: &Input) -> TokenStream {
 
         impl std::iter::FromIterator<#name> for #vec_name {
             fn from_iter<T: IntoIterator<Item=#name>>(iter: T) -> Self {
+                let mut iterator = iter.into_iter();
                 let mut result = #vec_name::new();
-                for element in iter {
-                    result.push(element);
+                if let Some(len) = iterator.size_hint().1 {
+                    result.reserve(len);
                 }
+                iterator.for_each(|element| result.push(element));
                 result
             }
         }
