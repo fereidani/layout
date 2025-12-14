@@ -335,21 +335,21 @@ pub fn derive(input: &Input) -> TokenStream {
             #[doc = #vec_name_str]
             /// ::retain()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.retain).
             pub fn retain<F>(&mut self, mut f: F) where F: FnMut(#ref_name) -> bool {
-                let len = self.len();
-                let mut del = 0;
+                let mut slice = self.as_mut_slice();
+                let len = slice.len();
+                let mut write_idx = 0;
 
-                {
-                    let mut slice = self.as_mut_slice();
-                    for i in 0..len {
-                        if !f(slice.get(i).unwrap()) {
-                            del += 1;
-                        } else if del > 0 {
-                            slice.swap(i - del, i);
+                for read_idx in 0..len {
+                    if f(slice.get(read_idx).unwrap()) {
+                        if write_idx != read_idx {
+                            slice.swap(write_idx, read_idx);
                         }
+                        write_idx += 1;
                     }
                 }
-                if del > 0 {
-                    self.truncate(len - del);
+
+                if write_idx < len {
+                    self.truncate(write_idx);
                 }
             }
 
@@ -361,14 +361,12 @@ pub fn derive(input: &Input) -> TokenStream {
                 let len = slice.len();
                 let mut write_idx = 0;
 
-                {
-                    for read_idx in 0..len {
-                        if f(slice.get_mut(read_idx).unwrap()) {
-                            if write_idx != read_idx {
-                                slice.swap(write_idx, read_idx);
-                            }
-                            write_idx += 1;
+                for read_idx in 0..len {
+                    if f(slice.get_mut(read_idx).unwrap()) {
+                        if write_idx != read_idx {
+                            slice.swap(write_idx, read_idx);
                         }
+                        write_idx += 1;
                     }
                 }
 
