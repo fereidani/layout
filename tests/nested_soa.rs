@@ -1,16 +1,16 @@
-use soa_derive::StructOfArray;
+use layout::SOA;
 
-#[derive(Debug, Clone, PartialEq, StructOfArray)]
+#[derive(Debug, Clone, PartialEq, SOA)]
 pub struct Point {
     x: f32,
     y: f32,
 }
 
 mod other_mod {
-    use soa_derive::StructOfArray;
+    use layout::SOA;
 
-    #[derive(Debug, Clone, PartialEq, StructOfArray)]
-    #[soa_derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Clone, PartialEq, SOA)]
+    #[layout(Debug, Clone, PartialEq)]
     pub struct Color {
         pub r: u8,
         pub g: u8,
@@ -21,8 +21,8 @@ mod other_mod {
 
 use other_mod::*;
 
-#[derive(Debug, Clone, PartialEq, StructOfArray)]
-#[soa_derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, SOA)]
+#[layout(Debug, Clone, PartialEq)]
 pub struct Particle {
     pub point: Point,
     #[nested_soa]

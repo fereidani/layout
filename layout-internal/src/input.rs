@@ -16,7 +16,7 @@ pub struct Input {
     /// The struct overall visibility
     pub visibility: Visibility,
     /// Additional attributes requested with `#[soa_attr(...)]` or
-    /// `#[soa_derive()]`
+    /// `#[layout()]`
     pub attrs: ExtraAttributes,
 }
 
@@ -47,7 +47,7 @@ impl ExtraAttributes {
         }
     }
 
-    /// Add a single trait from `#[soa_derive]`
+    /// Add a single trait from `#[layout]`
     fn add_derive(&mut self, ident: &proc_macro2::Ident) {
         let derive_only_vec = |ident| {
             static EXCEPTIONS: &[&str] = &["Clone", "Deserialize", "Serialize"];
@@ -103,15 +103,15 @@ impl Input {
                     field_is_nested.push(contains_nested_soa(&field.attrs));
                 }
             }
-            _ => panic!("#[derive(StructOfArray)] only supports struct"),
+            _ => panic!("#[derive(SOA)] only supports struct"),
         };
 
-        assert!(!fields.is_empty(), "#[derive(StructOfArray)] only supports struct with fields");
+        assert!(!fields.is_empty(), "#[derive(SOA)] only supports struct with fields");
 
         let mut extra_attrs = ExtraAttributes::new();
 
         for attr in input.attrs {
-            if attr.path().is_ident("soa_derive") {
+            if attr.path().is_ident("layout") {
                 attr.parse_nested_meta(|meta| {
                     match meta.path.get_ident() {
                         Some(ident) => {
@@ -123,13 +123,13 @@ impl Input {
                         }
                         None => {
                             panic!(
-                                "expected #[soa_derive(Traits, To, Derive)], got #[{}]",
+                                "expected #[layout(Traits, To, Derive)], got #[{}]",
                                 quote!(attr)
                             );
                         }
                     }
                     Ok(())
-                }).expect("failed to parse soa_derive");
+                }).expect("failed to parse layout");
             }
 
             if attr.path().is_ident("soa_attr") {

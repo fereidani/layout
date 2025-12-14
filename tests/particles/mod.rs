@@ -1,9 +1,9 @@
-use std::fmt::Debug;
-use soa_derive::*;
+use core::fmt::Debug;
+use layout::*;
 use itertools::Itertools;
 
-#[derive(Debug, Clone, PartialOrd, PartialEq, StructOfArray)]
-#[soa_derive(Debug, Clone, PartialOrd, PartialEq)]
+#[derive(Debug, Clone, PartialOrd, PartialEq, SOA)]
+#[layout(Debug, Clone, PartialOrd, PartialEq)]
 pub struct Particle {
     pub name: String,
     pub mass: f64,

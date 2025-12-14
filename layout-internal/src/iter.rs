@@ -28,17 +28,17 @@ pub fn derive(input: &Input) -> TokenStream {
         .collect::<Vec<_>>();
 
     let iter_type = input.map_fields_nested_or(
-        |_, field_type| quote! { <#field_type as soa_derive::SoAIter<'a>>::Iter },
-        |_, field_type| quote! { ::std::slice::Iter<'a, #field_type> },
+        |_, field_type| quote! { <#field_type as layout::SoAIter<'a>>::Iter },
+        |_, field_type| quote! { ::core::slice::Iter<'a, #field_type> },
     ).concat_by(
-        |seq, next| { quote! { ::std::iter::Zip<#seq, #next> } }
+        |seq, next| { quote! { ::core::iter::Zip<#seq, #next> } }
     );
 
     let iter_mut_type = input.map_fields_nested_or(
-        |_, field_type| quote! { <#field_type as soa_derive::SoAIter<'a>>::IterMut },
-        |_, field_type| quote! { ::std::slice::IterMut<'a, #field_type> },
+        |_, field_type| quote! { <#field_type as layout::SoAIter<'a>>::IterMut },
+        |_, field_type| quote! { ::core::slice::IterMut<'a, #field_type> },
     ).concat_by(
-        |seq, next| { quote! { ::std::iter::Zip<#seq, #next> } }
+        |seq, next| { quote! { ::core::iter::Zip<#seq, #next> } }
     );
 
     let create_into_iter = input.map_fields_nested_or(
@@ -216,7 +216,7 @@ pub fn derive(input: &Input) -> TokenStream {
             }
         }
 
-        impl<'a> soa_derive::SoAIter<'a> for #name {
+        impl<'a> layout::SoAIter<'a> for #name {
             type Ref = #ref_name<'a>;
             type RefMut = #ref_mut_name<'a>;
             type Iter = #iter_name<'a>;
@@ -233,10 +233,11 @@ pub fn derive(input: &Input) -> TokenStream {
         }
 
 
-        impl std::iter::FromIterator<#name> for #vec_name {
+        impl core::iter::FromIterator<#name> for #vec_name {
             fn from_iter<T: IntoIterator<Item=#name>>(iter: T) -> Self {
                 let iterator = iter.into_iter();
-                let capacity = iterator.size_hint().1.unwrap_or(0);
+                let size_hint = iterator.size_hint();
+                let capacity = size_hint.1.unwrap_or(size_hint.0);
                 let mut result = #vec_name::with_capacity(capacity);
                 iterator.for_each(|element| result.push(element));
                 result
@@ -297,7 +298,7 @@ pub fn derive(input: &Input) -> TokenStream {
             }
         }
 
-        impl<'a> ::soa_derive::IntoSoAIter<'a, #name> for #slice_name<'a> {}
+        impl<'a> ::layout::IntoSoAIter<'a, #name> for #slice_name<'a> {}
     };
 
     return generated;

@@ -27,11 +27,11 @@ pub fn derive(input: &Input) -> TokenStream {
 
     let fields_names_hygienic_1 = input.fields.iter()
         .enumerate()
-        .map(|(i, _)| Ident::new(&format!("___soa_derive_private_1_{}", i), Span::call_site()))
+        .map(|(i, _)| Ident::new(&format!("___layout_private_1_{}", i), Span::call_site()))
         .collect::<Vec<_>>();
     let fields_names_hygienic_2 = input.fields.iter()
         .enumerate()
-        .map(|(i, _)| Ident::new(&format!("___soa_derive_private_2_{}", i), Span::call_site()))
+        .map(|(i, _)| Ident::new(&format!("___layout_private_2_{}", i), Span::call_site()))
         .collect::<Vec<_>>();
 
     let slice_fields_types = input.map_fields_nested_or(
@@ -52,7 +52,7 @@ pub fn derive(input: &Input) -> TokenStream {
             let slice_type = names::slice_name(field_type);
             quote! { #slice_type::from_raw_parts(data.#ident, len) }
         },
-        |ident, _| quote! { ::std::slice::from_raw_parts(data.#ident, len) },
+        |ident, _| quote! { ::core::slice::from_raw_parts(data.#ident, len) },
     ).collect::<Vec<_>>();
 
     let mut generated = quote! {
@@ -174,7 +174,7 @@ pub fn derive(input: &Input) -> TokenStream {
             /// ::get()`](https://doc.rust-lang.org/std/primitive.slice.html#method.get).
             pub fn get<'b, I>(&'b self, index: I) -> Option<I::RefOutput>
             where
-                I: ::soa_derive::SoAIndex<#slice_name<'b>>,
+                I: ::layout::SoAIndex<#slice_name<'b>>,
                 'a: 'b
             {
                 let slice: #slice_name<'b> = self.reborrow();
@@ -186,7 +186,7 @@ pub fn derive(input: &Input) -> TokenStream {
             /// ::get_unchecked()`](https://doc.rust-lang.org/std/primitive.slice.html#method.get_unchecked).
             pub unsafe fn get_unchecked<'b, I>(&'b self, index: I) -> I::RefOutput
             where
-                I: ::soa_derive::SoAIndex<#slice_name<'b>>,
+                I: ::layout::SoAIndex<#slice_name<'b>>,
                 'a: 'b
             {
                 let slice: #slice_name<'b> = self.reborrow();
@@ -194,14 +194,14 @@ pub fn derive(input: &Input) -> TokenStream {
             }
 
             /// Similar to the
-            /// [`std::ops::Index`](https://doc.rust-lang.org/std/ops/trait.Index.html)
+            /// [`core::ops::Index`](https://doc.rust-lang.org/std/ops/trait.Index.html)
             /// trait for `&
             #[doc = #slice_name_str]
             ///` .
-            /// This is required because we cannot implement `std::ops::Index` directly since it requires returning a reference.
+            /// This is required because we cannot implement `core::ops::Index` directly since it requires returning a reference.
             pub fn index<'b, I>(&'b self, index: I) -> I::RefOutput
             where
-                I: ::soa_derive::SoAIndex<#slice_name<'b>>,
+                I: ::layout::SoAIndex<#slice_name<'b>>,
                 'a: 'b
             {
                 let slice: #slice_name<'b> = self.reborrow();
@@ -227,7 +227,7 @@ pub fn derive(input: &Input) -> TokenStream {
                 }
             }
 
-            /// Similar to [`std::slice::from_raw_parts()`](https://doc.rust-lang.org/std/slice/fn.from_raw_parts.html).
+            /// Similar to [`core::slice::from_raw_parts()`](https://doc.rust-lang.org/std/slice/fn.from_raw_parts.html).
             pub unsafe fn from_raw_parts<'b>(data: #ptr_name, len: usize) -> #slice_name<'b> {
                 #slice_name {
                     #( #fields_names: #slice_from_raw_parts, )*
@@ -254,7 +254,7 @@ pub fn derive(input: &Input) -> TokenStream {
 
         {
             generated.append_all(quote! {
-                impl<'a> ::soa_derive::ToSoAVec<#name> for #slice_name<'a> {
+                impl<'a> ::layout::ToSoAVec<#name> for #slice_name<'a> {
                     type SoAVecType = #vec_name;
 
                     fn to_vec(&self) -> Self::SoAVecType {
@@ -293,11 +293,11 @@ pub fn derive_mut(input: &Input) -> TokenStream {
     let first_field = &fields_names[0];
     let fields_names_hygienic_1 = &input.fields.iter()
         .enumerate()
-        .map(|(i, _)| Ident::new(&format!("___soa_derive_private_slice_1_{}", i), Span::call_site()))
+        .map(|(i, _)| Ident::new(&format!("___layout_private_slice_1_{}", i), Span::call_site()))
         .collect::<Vec<_>>();
     let fields_names_hygienic_2 = &input.fields.iter()
         .enumerate()
-        .map(|(i, _)| Ident::new(&format!("___soa_derive_private_slice_2_{}", i), Span::call_site()))
+        .map(|(i, _)| Ident::new(&format!("___layout_private_slice_2_{}", i), Span::call_site()))
         .collect::<Vec<_>>();
 
     let slice_mut_fields_types = input.map_fields_nested_or(
@@ -328,7 +328,7 @@ pub fn derive_mut(input: &Input) -> TokenStream {
             let slice_type = names::slice_mut_name(field_type);
             quote! { #slice_type::from_raw_parts_mut(data.#ident, len) }
         },
-        |ident, _| quote! {::std::slice::from_raw_parts_mut(data.#ident, len) },
+        |ident, _| quote! {::core::slice::from_raw_parts_mut(data.#ident, len) },
     ).collect::<Vec<_>>();
 
     let mut nested_ord = input.map_fields_nested_or(
@@ -496,7 +496,7 @@ pub fn derive_mut(input: &Input) -> TokenStream {
             /// ::get()`](https://doc.rust-lang.org/std/primitive.slice.html#method.get).
             pub fn get<'b, I>(&'b self, index: I) -> Option<I::RefOutput>
             where
-                I: ::soa_derive::SoAIndex<#slice_name<'b>>,
+                I: ::layout::SoAIndex<#slice_name<'b>>,
                 'a: 'b
             {
                 let slice: #slice_name<'b> = self.as_slice();
@@ -508,7 +508,7 @@ pub fn derive_mut(input: &Input) -> TokenStream {
             /// ::get_unchecked()`](https://doc.rust-lang.org/std/primitive.slice.html#method.get_unchecked).
             pub unsafe fn get_unchecked<'b, I>(&'b self, index: I) -> I::RefOutput
             where
-                I: ::soa_derive::SoAIndex<#slice_name<'b>>,
+                I: ::layout::SoAIndex<#slice_name<'b>>,
                 'a: 'b
             {
                 let slice: #slice_name<'b> = self.as_slice();
@@ -517,14 +517,14 @@ pub fn derive_mut(input: &Input) -> TokenStream {
 
 
             /// Similar to the
-            /// [`std::ops::Index`](https://doc.rust-lang.org/std/ops/trait.Index.html)
+            /// [`core::ops::Index`](https://doc.rust-lang.org/std/ops/trait.Index.html)
             /// trait for `&
             #[doc = #slice_name_str]
             ///` .
             /// This is required because we cannot implement that trait.
             pub fn index<'b, I>(&'b self, index: I) -> I::RefOutput
             where
-                I: ::soa_derive::SoAIndex<#slice_name<'b>>,
+                I: ::layout::SoAIndex<#slice_name<'b>>,
                 'a: 'b
             {
                 let slice: #slice_name<'b> = self.as_slice();
@@ -536,7 +536,7 @@ pub fn derive_mut(input: &Input) -> TokenStream {
             /// ::get_mut()`](https://doc.rust-lang.org/std/primitive.slice.html#method.get_mut).
             pub fn get_mut<'b, I>(&'b mut self, index: I) -> Option<I::MutOutput>
             where
-                I: ::soa_derive::SoAIndexMut<#slice_mut_name<'b>>,
+                I: ::layout::SoAIndexMut<#slice_mut_name<'b>>,
                 'a: 'b
             {
                 let slice: #slice_mut_name<'b> = self.reborrow();
@@ -548,7 +548,7 @@ pub fn derive_mut(input: &Input) -> TokenStream {
             /// ::get_unchecked_mut()`](https://doc.rust-lang.org/std/primitive.slice.html#method.get_unchecked_mut).
             pub unsafe fn get_unchecked_mut<'b, I>(&'b mut self, index: I) -> I::MutOutput
             where
-                I: ::soa_derive::SoAIndexMut<#slice_mut_name<'b>>,
+                I: ::layout::SoAIndexMut<#slice_mut_name<'b>>,
                 'a: 'b
             {
                 let slice: #slice_mut_name<'b> = self.reborrow();
@@ -556,14 +556,14 @@ pub fn derive_mut(input: &Input) -> TokenStream {
             }
 
             /// Similar to the
-            /// [`std::ops::IndexMut`](https://doc.rust-lang.org/std/ops/trait.IndexMut.html)
+            /// [`core::ops::IndexMut`](https://doc.rust-lang.org/std/ops/trait.IndexMut.html)
             /// trait for `&mut
             #[doc = #slice_name_str]
             ///` .
-            /// This is required because we cannot implement `std::ops::IndexMut` directly since it requires returning a mutable reference.
+            /// This is required because we cannot implement `core::ops::IndexMut` directly since it requires returning a mutable reference.
             pub fn index_mut<'b, I>(&'b mut self, index: I) -> I::MutOutput
             where
-                I: ::soa_derive::SoAIndexMut<#slice_mut_name<'b>>,
+                I: ::layout::SoAIndexMut<#slice_mut_name<'b>>,
                 'a: 'b
             {
                 let slice: #slice_mut_name<'b> = self.reborrow();
@@ -608,7 +608,7 @@ pub fn derive_mut(input: &Input) -> TokenStream {
                 }
             }
 
-            /// Similar to [`std::slice::from_raw_parts_mut()`](https://doc.rust-lang.org/std/slice/fn.from_raw_parts_mut.html).
+            /// Similar to [`core::slice::from_raw_parts_mut()`](https://doc.rust-lang.org/std/slice/fn.from_raw_parts_mut.html).
             pub unsafe fn from_raw_parts_mut<'b>(data: #ptr_mut_name, len: usize) -> #slice_mut_name<'b> {
                 #slice_mut_name {
                     #( #fields_names: #slice_from_raw_parts_mut, )*
@@ -618,7 +618,7 @@ pub fn derive_mut(input: &Input) -> TokenStream {
             #[doc(hidden)]
             /// This is `pub` due to there will be compile-error if `#[nested_soa]` is used.
             /// Do not use this method directly.
-            pub fn __private_apply_permutation(&mut self, permutation: &mut soa_derive::Permutation) {
+            pub fn __private_apply_permutation(&mut self, permutation: &mut layout::Permutation) {
                 #( #apply_permutation; )*
             }
 
@@ -627,9 +627,9 @@ pub fn derive_mut(input: &Input) -> TokenStream {
             /// ::sort_by()`](https://doc.rust-lang.org/std/primitive.slice.html#method.sort_by).
             pub fn sort_by<F>(&mut self, mut f: F)
             where
-                F: FnMut(#ref_name, #ref_name) -> std::cmp::Ordering,
+                F: FnMut(#ref_name, #ref_name) -> core::cmp::Ordering,
             {
-                use soa_derive::Permutation;
+                use layout::Permutation;
 
                 let mut permutation: Vec<usize> = (0..self.len()).collect();
                 permutation.sort_by(|j, k| f(self.index(*j), self.index(*k)));
@@ -646,7 +646,7 @@ pub fn derive_mut(input: &Input) -> TokenStream {
                 F: FnMut(#ref_name) -> K,
                 K: Ord,
             {
-                use soa_derive::Permutation;
+                use layout::Permutation;
 
                 let mut permutation: Vec<usize> = (0..self.len()).collect();
                 permutation.sort_by_key(|i| f(self.index(*i)));
@@ -665,7 +665,7 @@ pub fn derive_mut(input: &Input) -> TokenStream {
             #[doc = #slice_name_str]
             /// ::sort()`](https://doc.rust-lang.org/std/primitive.slice.html#method.sort).
             pub fn sort(&mut self) {
-                use soa_derive::Permutation;
+                use layout::Permutation;
 
                 let mut permutation: Vec<usize> = (0..self.len()).collect();
                 permutation.sort_by_key(|i| self.index(*i));
@@ -693,7 +693,7 @@ pub fn derive_mut(input: &Input) -> TokenStream {
 
         {
             generated.append_all(quote! {
-                impl<'a> ::soa_derive::ToSoAVec<#name> for #slice_mut_name<'a> {
+                impl<'a> ::layout::ToSoAVec<#name> for #slice_mut_name<'a> {
                     type SoAVecType = #vec_name;
 
                     fn to_vec(&self) -> Self::SoAVecType {

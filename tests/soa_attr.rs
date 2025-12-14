@@ -1,6 +1,6 @@
-use soa_derive::StructOfArray;
+use layout::SOA;
 
-#[derive(Debug, Clone, PartialEq, StructOfArray)]
+#[derive(Debug, Clone, PartialEq, SOA)]
 #[soa_attr(Vec, cfg_attr(test, derive(PartialEq, Debug)))]
 pub struct Particle {
     pub name: String,

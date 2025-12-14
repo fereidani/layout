@@ -1,6 +1,6 @@
 #![allow(clippy::float_cmp)]
 
-use soa_derive::soa_zip;
+use layout::soa_zip;
 mod particles;
 use self::particles::{Particle, ParticleVec, ParticleSlice, ParticleSliceMut};
 
@@ -129,11 +129,11 @@ impl Wrapper {
         }
     }
 
-    fn particles(&self) -> ParticleSlice {
+    fn particles(&self) -> ParticleSlice<'_> {
         self.particles.as_slice()
     }
 
-    fn particles_mut(&mut self) -> ParticleSliceMut {
+    fn particles_mut(&mut self) -> ParticleSliceMut<'_> {
         self.particles.as_mut_slice()
     }
 }

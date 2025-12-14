@@ -1,15 +1,17 @@
 #![allow(clippy::float_cmp)]
 
-use std::cell::Cell;
-use std::rc::Rc;
+extern crate alloc;
+
+use core::cell::Cell;
+use alloc::rc::Rc;
 
 mod particles;
 use self::particles::{Particle, ParticleVec};
-use soa_derive::StructOfArray;
+use layout::SOA;
 
 #[test]
 fn ty() {
-    let _: <Particle as StructOfArray>::Type = ParticleVec::new();
+    let _: <Particle as SOA>::Type = ParticleVec::new();
 }
 
 #[test]
@@ -181,7 +183,7 @@ fn retain_mut() {
     assert!(["CL", "NA", "C"].iter().copied().eq(particles.name.iter()));
 }
 
-#[derive(StructOfArray)]
+#[derive(SOA)]
 struct IncrOnDrop {
     cell: Rc<Cell<usize>>,
 }

@@ -1,6 +1,6 @@
 #![allow(clippy::float_cmp)]
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 mod particles;
 
@@ -110,7 +110,7 @@ fn vec() {
     let capacity = particles.capacity();
     let ptr = particles.as_mut_ptr();
 
-    std::mem::forget(particles);
+    core::mem::forget(particles);
 
     unsafe {
         *ptr.as_mut().unwrap().name = String::from("Fe");
@@ -134,8 +134,8 @@ fn vec() {
     assert_eq!(particles.mass[2], 3.0);
 }
 
-#[derive(Clone, soa_derive::StructOfArray)]
-#[soa_derive(Clone)]
+#[derive(Clone, layout::SOA)]
+#[layout(Clone)]
 struct CountOnDrop {
     data: usize,
 }

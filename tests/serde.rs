@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
-use soa_derive::StructOfArray;
+use layout::SOA;
 
-#[derive(Debug, Clone, PartialEq, StructOfArray)]
-#[soa_derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, SOA)]
+#[layout(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Particle {
     pub name: String,
     pub mass: f64,

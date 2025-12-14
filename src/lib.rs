@@ -1,11 +1,12 @@
-//! This crate provides a custom derive (`#[derive(StructOfArray)]`) to
+#![cfg_attr(not(feature = "std"), no_std)]
+//! This crate provides a custom derive (`#[derive(SOA)]`) to
 //! automatically generate code from a given struct `T` that allow to replace
 //! `Vec<T>` with a struct of arrays. For example, the following code
 //!
 //! ```
-//! # #[macro_use] extern crate soa_derive;
+//! # #[macro_use] extern crate layout;
 //! # mod cheese {
-//! #[derive(StructOfArray)]
+//! #[derive(SOA)]
 //! pub struct Cheese {
 //!     pub smell: f64,
 //!     pub color: (f64, f64, f64),
@@ -33,16 +34,16 @@
 //!
 //! # How to use it
 //!
-//! Add `#[derive(StructOfArray)]` to each struct you want to derive a struct of
+//! Add `#[derive(SOA)]` to each struct you want to derive a struct of
 //! array version. If you need the helper structs to derive additional traits
-//! (such as `Debug` or `PartialEq`), you can add an attribute `#[soa_derive =
+//! (such as `Debug` or `PartialEq`), you can add an attribute `#[layout =
 //! "Debug, PartialEq"]` to the struct declaration.
 //!
 //! ```
-//! # #[macro_use] extern crate soa_derive;
+//! # #[macro_use] extern crate layout;
 //! # mod cheese {
-//! #[derive(Debug, PartialEq, StructOfArray)]
-//! #[soa_derive(Debug, PartialEq)]
+//! #[derive(Debug, PartialEq, SOA)]
+//! #[layout(Debug, PartialEq)]
 //! pub struct Cheese {
 //!     pub smell: f64,
 //!     pub color: (f64, f64, f64),
@@ -58,9 +59,9 @@
 //! struct declaration.
 //!
 //! ```
-//! # #[macro_use] extern crate soa_derive;
+//! # #[macro_use] extern crate layout;
 //! # mod cheese {
-//! #[derive(Debug, PartialEq, StructOfArray)]
+//! #[derive(Debug, PartialEq, SOA)]
 //! #[soa_attr(Vec, cfg_attr(test, derive(PartialEq)))]
 //! pub struct Cheese {
 //!     pub smell: f64,
@@ -109,9 +110,9 @@
 //! It is possible to iterate over the values in a `CheeseVec`
 //!
 //! ```no_run
-//! # #[macro_use] extern crate soa_derive;
+//! # #[macro_use] extern crate layout;
 //! # mod cheese {
-//! # #[derive(Debug, PartialEq, StructOfArray)]
+//! # #[derive(Debug, PartialEq, SOA)]
 //! # pub struct Cheese {
 //! #     pub smell: f64,
 //! #     pub color: (f64, f64, f64),
@@ -139,9 +140,9 @@
 //! can manually pick the needed fields:
 //!
 //! ```no_run
-//! # #[macro_use] extern crate soa_derive;
+//! # #[macro_use] extern crate layout;
 //! # mod cheese {
-//! # #[derive(Debug, PartialEq, StructOfArray)]
+//! # #[derive(Debug, PartialEq, SOA)]
 //! # pub struct Cheese {
 //! #     pub smell: f64,
 //! #     pub color: (f64, f64, f64),
@@ -166,9 +167,9 @@
 //! [soa_zip!](macro.soa_zip.html) macro.
 //!
 //! ```no_run
-//! # #[macro_use] extern crate soa_derive;
+//! # #[macro_use] extern crate layout;
 //! # mod cheese {
-//! # #[derive(Debug, PartialEq, StructOfArray)]
+//! # #[derive(Debug, PartialEq, SOA)]
 //! # pub struct Cheese {
 //! #     pub smell: f64,
 //! #     pub color: (f64, f64, f64),
@@ -197,13 +198,13 @@
 //!
 //! ```
 //! # mod cheese {
-//! # use soa_derive::StructOfArray;
-//! #[derive(StructOfArray)]
+//! # use layout::SOA;
+//! #[derive(SOA)]
 //! pub struct Point {
 //!     x: f32,
 //!     y: f32,
 //! }
-//! #[derive(StructOfArray)]
+//! #[derive(SOA)]
 //! pub struct Particle {
 //!     #[nested_soa]
 //!     point: Point,
@@ -229,7 +230,7 @@
 //!
 //! # Use in a generic context
 //!
-//! `StructOfArray` does not provide a set of common operations by default. Thus if you wanted to use a `StructOfArray`
+//! `SOA` does not provide a set of common operations by default. Thus if you wanted to use a `SOA`
 //! type in a generic context, there is no way to guarantee to the type system that any methods are available.
 //!
 //! This will also generate implementations of [`SoAVec`], [`SoASlice`], and [`SoASliceMut`] for the respective
@@ -237,38 +238,43 @@
 //!
 //! ```ignore
 //! # mod cheese {
-//! # use soa_derive::{StructOfArray, prelude::*};
-//! #[derive(StructOfArray)]
+//! # use layout::{SOA, prelude::*};
+//! #[derive(SOA)]
 //! pub struct Point {
 //!     x: f32,
 //!     y: f32,
 //! }
 //!
-//! fn get_num_items<T: StructOfArray, V: SoAVec<T>>(values: &V) -> usize {
+//! fn get_num_items<T: SOA, V: SoAVec<T>>(values: &V) -> usize {
 //!     values.len()
 //! }
 //! # }
 //! ```
 
-// The proc macro is implemented in soa_derive_internal, and re-exported by this
+extern crate alloc;
+#[allow(unused_imports)]
+use alloc::{vec::Vec,string::String};
+
+
+// The proc macro is implemented in layout_internal, and re-exported by this
 // crate. This is because a single crate can not define both a proc macro and a
 // macro_rules macro.
-pub use soa_derive_internal::StructOfArray;
+pub use layout_internal::SOA;
 
 // External dependency necessary for implementing the sorting methods.
 // It is basically used by the macro-generated code.
 #[doc(hidden)]
 pub use permutation::permutation::*;
 
-/// Any struct derived by StructOfArray will auto impl this trait You can use
-/// `<Cheese as StructOfArray>::Type` instead of explicit named type
+/// Any struct derived by SOA will auto impl this trait You can use
+/// `<Cheese as SOA>::Type` instead of explicit named type
 /// `CheeseVec`; This will helpful in generics programing that generate struct
-/// can be expressed as `<T as StructOfArray>::Type`
-pub trait StructOfArray {
+/// can be expressed as `<T as SOA>::Type`
+pub trait SOA {
     type Type;
 }
 
-/// Any struct derived by StructOfArray will auto impl this trait.
+/// Any struct derived by SOA will auto impl this trait.
 ///
 /// Useful for generic programming and implementation of attribute `nested_soa`.
 ///
@@ -283,11 +289,11 @@ pub trait SoAIter<'a> {
 }
 
 mod private_soa_indexes {
-    // From [`std::slice::SliceIndex`](https://doc.rust-lang.org/std/slice/trait.SliceIndex.html) code.
+    // From [`core::slice::SliceIndex`](https://doc.rust-lang.org/std/slice/trait.SliceIndex.html) code.
     // Limits the types that may implement the SoA index traits.
     // It's also helpful to have the exaustive list of all accepted types.
 
-    use ::std::ops;
+    use ::core::ops;
 
     pub trait Sealed {}
 
@@ -301,7 +307,7 @@ mod private_soa_indexes {
 }
 
 /// Helper trait used for indexing operations.
-/// Inspired by [`std::slice::SliceIndex`](https://doc.rust-lang.org/std/slice/trait.SliceIndex.html).
+/// Inspired by [`core::slice::SliceIndex`](https://doc.rust-lang.org/std/slice/trait.SliceIndex.html).
 pub trait SoAIndex<T>: private_soa_indexes::Sealed {
     /// The output for the non-mutable functions
     type RefOutput;
@@ -321,7 +327,7 @@ pub trait SoAIndex<T>: private_soa_indexes::Sealed {
 }
 
 /// Helper trait used for indexing operations returning mutable references.
-/// Inspired by [`std::slice::SliceIndex`](https://doc.rust-lang.org/std/slice/trait.SliceIndex.html).
+/// Inspired by [`core::slice::SliceIndex`](https://doc.rust-lang.org/std/slice/trait.SliceIndex.html).
 pub trait SoAIndexMut<T>: private_soa_indexes::Sealed {
     /// The output for the mutable functions
     type MutOutput;
@@ -348,9 +354,9 @@ pub trait SoAIndexMut<T>: private_soa_indexes::Sealed {
 /// with `mut`.
 ///
 /// ```
-/// # #[macro_use] extern crate soa_derive;
+/// # #[macro_use] extern crate layout;
 /// # mod cheese {
-/// #[derive(StructOfArray)]
+/// #[derive(SOA)]
 /// struct Cheese {
 ///     size: f64,
 ///     mass: f64,
@@ -381,9 +387,9 @@ pub trait SoAIndexMut<T>: private_soa_indexes::Sealed {
 /// iterator returns None.
 ///
 /// ```
-/// # #[macro_use] extern crate soa_derive;
+/// # #[macro_use] extern crate layout;
 /// # mod cheese {
-/// # #[derive(StructOfArray)]
+/// # #[derive(SOA)]
 /// # struct Cheese {
 /// #     size: f64,
 /// #     mass: f64,
@@ -410,9 +416,9 @@ macro_rules! soa_zip {
 }
 
 
-/// This trait is automatically implemented by the relevant generated by [`StructOfArray`].
+/// This trait is automatically implemented by the relevant generated by [`SOA`].
 ///
-/// Links a [`StructOfArray`] type to its raw pointer types, which is useful for generic
+/// Links a [`SOA`] type to its raw pointer types, which is useful for generic
 /// programming.
 pub trait SoAPointers {
     /// The immutable pointer type for an SoA type
@@ -428,7 +434,7 @@ mod generics {
     /**
     The interface for the `Slice` immutable slice struct-of-arrays type.
     */
-    pub trait SoASlice<T: StructOfArray> {
+    pub trait SoASlice<T: SOA> {
         /// The type that elements will be proxied with as
         type Ref<'t> where Self: 't;
 
@@ -457,7 +463,7 @@ mod generics {
         /// Analogous to [`slice::get()`](https://doc.rust-lang.org/std/primitive.slice.html#method.get)
         fn get(&self, index: usize) -> Option<Self::Ref<'_>>;
 
-        /// Analogous to [`std::ops::Index::index()`] for `usize`
+        /// Analogous to [`core::ops::Index::index()`] for `usize`
         fn index(&self, index: usize) -> Self::Ref<'_>;
 
         /// Create an immutable iterator
@@ -481,7 +487,7 @@ mod generics {
     The interface for the `SliceMut` mutable slice struct-of-arrays type. A generalization of [`SoASlice`]
     whose methods can modify elements of the arrays
     */
-    pub trait SoASliceMut<T: StructOfArray> {
+    pub trait SoASliceMut<T: SOA> {
         /// The type that elements will be proxied with as
         type Ref<'t> where Self: 't;
 
@@ -522,7 +528,7 @@ mod generics {
         /// Analogous to [`slice::get()`](https://doc.rust-lang.org/std/primitive.slice.html#method.get)
         fn get(&self, index: usize) -> Option<Self::Ref<'_>>;
 
-        /// Analogous to [`std::ops::Index::index()`] for `usize`
+        /// Analogous to [`core::ops::Index::index()`] for `usize`
         fn index(&self, index: usize) -> Self::Ref<'_>;
 
         /// Create an immutable iterator
@@ -551,7 +557,7 @@ mod generics {
         /// Analogous to [`slice::get_mut()`](https://doc.rust-lang.org/std/primitive.slice.html#method.get_mut)
         fn get_mut(&mut self, index: usize) -> Option<Self::RefMut<'_>>;
 
-        /// Analogous to [`std::ops::IndexMut::index_mut()`] for `usize`
+        /// Analogous to [`core::ops::IndexMut::index_mut()`] for `usize`
         fn index_mut(&mut self, index: usize) -> Self::RefMut<'_>;
 
         /// Creates a mutable iterator
@@ -563,7 +569,7 @@ mod generics {
         fn apply_index(&mut self, indices: &[usize]);
 
         /// `[slice::sort_by()`](<https://doc.rust-lang.org/std/primitive.slice.html#method.sort_by>).
-        fn sort_by<F>(&mut self, mut f: F) where F: FnMut(Self::Ref<'_>, Self::Ref<'_>) -> std::cmp::Ordering {
+        fn sort_by<F>(&mut self, mut f: F) where F: FnMut(Self::Ref<'_>, Self::Ref<'_>) -> core::cmp::Ordering {
             let mut permutation: Vec<usize> = (0..self.len()).collect();
             permutation.sort_by(|j, k| f(self.index(*j), self.index(*k)));
 
@@ -601,7 +607,7 @@ mod generics {
 
     **NOTE**: This interface is incomplete and additional methods may be added as needed.
     */
-    pub trait SoAVec<T: StructOfArray> {
+    pub trait SoAVec<T: SOA> {
         /// The type that elements will be proxied with as
         type Ref<'t> where Self: 't;
 
@@ -642,7 +648,7 @@ mod generics {
         /// Analogous to [`slice::get()`](https://doc.rust-lang.org/std/primitive.slice.html#method.get)
         fn get(&self, index: usize) -> Option<Self::Ref<'_>>;
 
-        /// Analogous to [`std::ops::Index::index()`] for `usize`
+        /// Analogous to [`core::ops::Index::index()`] for `usize`
         fn index(&self, index: usize) -> Self::Ref<'_>;
 
         /// Create an immutable iterator
@@ -671,7 +677,7 @@ mod generics {
         /// Analogous to [`slice::get_mut()`](https://doc.rust-lang.org/std/primitive.slice.html#method.get_mut)
         fn get_mut(&mut self, index: usize) -> Option<Self::RefMut<'_>>;
 
-        /// Analogous to [`std::ops::IndexMut::index_mut()`] for `usize`
+        /// Analogous to [`core::ops::IndexMut::index_mut()`] for `usize`
         fn index_mut(&mut self, index: usize) -> Self::RefMut<'_>;
 
         /// Creates a mutable iterator
@@ -683,7 +689,7 @@ mod generics {
         fn apply_index(&mut self, indices: &[usize]);
 
         /// `[slice::sort_by()`](<https://doc.rust-lang.org/std/primitive.slice.html#method.sort_by>).
-        fn sort_by<F>(&mut self, mut f: F) where F: FnMut(Self::Ref<'_>, Self::Ref<'_>) -> std::cmp::Ordering {
+        fn sort_by<F>(&mut self, mut f: F) where F: FnMut(Self::Ref<'_>, Self::Ref<'_>) -> core::cmp::Ordering {
             let mut permutation: Vec<usize> = (0..self.len()).collect();
             permutation.sort_by(|j, k| f(self.index(*j), self.index(*k)));
 
@@ -744,7 +750,7 @@ mod generics {
         /// Analogous to [`Vec::insert`]
         fn insert(&mut self, index: usize, element: T);
 
-        /// Similar to [`std::mem::replace()`](https://doc.rust-lang.org/std/mem/fn.replace.html).
+        /// Similar to [`core::mem::replace()`](https://doc.rust-lang.org/std/mem/fn.replace.html).
         fn replace(&mut self, index: usize, element: T) -> T;
 
         /// Analogous to [`Vec::remove`]
@@ -765,7 +771,7 @@ mod generics {
 
     /// A trait to implement `Clone`-dependent behavior to convert a non-owning SoA type into an
     /// owning [`SoAVec`].
-    pub trait ToSoAVec<T: StructOfArray> {
+    pub trait ToSoAVec<T: SOA> {
         type SoAVecType: SoAVec<T>;
 
         /// Similar to [`slice::to_vec()`](https://doc.rust-lang.org/std/primitive.slice.html#method.to_vec)
@@ -774,14 +780,14 @@ mod generics {
 
     /// A trait to implement `Clone`-dependent behavior to extend an [`SoAVec`] with data copied
     /// from its associated `Slice` type.
-    pub trait SoAAppendVec<T: StructOfArray>: SoAVec<T> {
+    pub trait SoAAppendVec<T: SOA>: SoAVec<T> {
 
         /// Analogous to [`Vec::extend_from_slice`]
         fn extend_from_slice(&mut self, other: Self::Slice<'_>);
     }
 
     /// A trait to express the [`IntoIterator`] guarantee of [`SoASlice`] types in the type system.
-    pub trait IntoSoAIter<'a, T: StructOfArray>: SoASlice<T> + IntoIterator<Item=Self::Ref<'a>> + 'a {}
+    pub trait IntoSoAIter<'a, T: SOA>: SoASlice<T> + IntoIterator<Item=Self::Ref<'a>> + 'a {}
 }
 pub use generics::*;
 
@@ -802,7 +808,7 @@ macro_rules! soa_zip_impl {
     // The main code is emmited here: we create an iterator, zip it and then
     // map the zipped iterator to flatten it
     (@last , $first: expr, $($tail: expr,)*) => {
-        ::std::iter::IntoIterator::into_iter($first)
+        ::core::iter::IntoIterator::into_iter($first)
             $(
                 .zip($tail)
             )*

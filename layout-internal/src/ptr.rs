@@ -187,7 +187,7 @@ pub fn derive(input: &Input) -> TokenStream {
             }
         }
 
-        impl ::soa_derive::SoAPointers for #name {
+        impl ::layout::SoAPointers for #name {
             type Ptr = #ptr_name;
             type MutPtr = #ptr_mut_name;
         }
@@ -311,11 +311,11 @@ pub fn derive(input: &Input) -> TokenStream {
             #[allow(clippy::forget_non_drop)]
             pub unsafe fn write(self, val: #name) {
                 unsafe {
-                    #(self.#fields_names.write(::std::ptr::read(&val.#fields_names));)*
+                    #(self.#fields_names.write(::core::ptr::read(&val.#fields_names));)*
                 }
                 // if val implements Drop, we don't want to run it here, only
                 // when the vec itself will be dropped
-                ::std::mem::forget(val);
+                ::core::mem::forget(val);
             }
 
             /// Similar to [`*mut T::write_volatile()`](https://doc.rust-lang.org/std/primitive.pointer.html#method.write_volatile),
@@ -323,11 +323,11 @@ pub fn derive(input: &Input) -> TokenStream {
             #[allow(clippy::forget_non_drop)]
             pub unsafe fn write_volatile(self, val: #name) {
                 unsafe {
-                    #(self.#fields_names.write_volatile(::std::ptr::read(&val.#fields_names));)*
+                    #(self.#fields_names.write_volatile(::core::ptr::read(&val.#fields_names));)*
                 }
                 // if val implements Drop, we don't want to run it here, only
                 // when the vec itself will be dropped
-                ::std::mem::forget(val);
+                ::core::mem::forget(val);
             }
 
             /// Similar to [`*mut T::write_unaligned()`](https://doc.rust-lang.org/std/primitive.pointer.html#method.write_unaligned),
@@ -335,11 +335,11 @@ pub fn derive(input: &Input) -> TokenStream {
             #[allow(clippy::forget_non_drop)]
             pub unsafe fn write_unaligned(self, val: #name) {
                 unsafe {
-                    #(self.#fields_names.write_unaligned(::std::ptr::read(&val.#fields_names));)*
+                    #(self.#fields_names.write_unaligned(::core::ptr::read(&val.#fields_names));)*
                 }
                 // if val implements Drop, we don't want to run it here, only
                 // when the vec itself will be dropped
-                ::std::mem::forget(val);
+                ::core::mem::forget(val);
             }
         }
 

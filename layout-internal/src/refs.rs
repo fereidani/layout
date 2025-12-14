@@ -28,7 +28,7 @@ pub fn derive(input: &Input) -> TokenStream {
 
     let fields_names_hygienic = input.fields.iter()
         .enumerate()
-        .map(|(i, _)| Ident::new(&format!("___soa_derive_private_{}", i), Span::call_site()))
+        .map(|(i, _)| Ident::new(&format!("___layout_private_{}", i), Span::call_site()))
         .collect::<Vec<_>>();
 
     let ref_fields_types = input.map_fields_nested_or(
@@ -64,7 +64,7 @@ pub fn derive(input: &Input) -> TokenStream {
 
     let ref_replace = input.map_fields_nested_or(
         |ident, _| quote! { self.#ident.replace(field) },
-        |ident, _| quote! { ::std::mem::replace(&mut *self.#ident, field) },
+        |ident, _| quote! { ::core::mem::replace(&mut *self.#ident, field) },
     ).collect::<Vec<_>>();
 
     quote! {
@@ -169,16 +169,16 @@ pub fn derive(input: &Input) -> TokenStream {
                 }
             }
 
-            /// Similar to [`std::mem::replace()`](https://doc.rust-lang.org/std/mem/fn.replace.html).
+            /// Similar to [`core::mem::replace()`](https://doc.rust-lang.org/std/mem/fn.replace.html).
             #[allow(clippy::forget_non_drop)]
             pub fn replace(&mut self, val: #name) -> #name {
                 #(
-                    let field = unsafe { ::std::ptr::read(&val.#fields_names) };
+                    let field = unsafe { ::core::ptr::read(&val.#fields_names) };
                     let #fields_names_hygienic = #ref_replace;
                 )*
                 // if val implements Drop, we don't want to run it here, only
                 // when the vec itself will be dropped
-                ::std::mem::forget(val);
+                ::core::mem::forget(val);
 
                 #name{#(#fields_names: #fields_names_hygienic),*}
             }

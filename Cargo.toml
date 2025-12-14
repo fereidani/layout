@@ -1,27 +1,27 @@
 [package]
-name = "soa_derive"
-version = "0.13.0"
-edition = "2018"
+name = "layout"
+version = "0.0.1"
+edition = "2021"
 rust-version = "1.65"
-
-authors = ["Guillaume Fraux <guillaume.fraux@epfl.ch>"]
 license = "MIT/Apache-2.0"
-
 readme = "README.md"
-description = "Automatic Struct of Array generation"
-repository = "https://github.com/lumol-org/soa-derive"
-homepage = "https://github.com/lumol-org/soa-derive"
-documentation = "https://docs.rs/soa_derive/"
+description = "Optimized memory layout using struct of array, Data-oriented design in Rust, DOD SOA"
+repository = "https://github.com/fereidani/layout"
+homepage = "https://github.com/fereidani/layout"
+documentation = "https://docs.rs/layout/"
+categories = ["data-structures", "no-std"]
+keywords = ["soa", "dod", "data-oriented", "struct-of-array", "performance"]
+
+[features]
+default = ["std"]
+std = []
 
 [workspace]
-members = [
-    "soa-derive-internal",
-    "example",
-]
+members = ["layout-internal"]
 
 [dependencies]
-soa_derive_internal = {path = "soa-derive-internal", version = "0.13"}
-permutation = "0.4.0"
+layout_internal = { path = "layout-internal", version = "0.0.1" }
+permutation = "0.4.1"
 
 [dev-dependencies]
 bencher = "0.1"
@@ -35,3 +35,12 @@ rustc_version = "0.4"
 [[bench]]
 name = "soa"
 harness = false
+
+
+[profile.bench]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+rpath = true
+debug = false
+incremental = false

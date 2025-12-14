@@ -2,23 +2,23 @@
 #![cfg(rustc_is_at_least_1_78)]
 
 mod particles;
-use std::marker::PhantomData;
-use std::fmt::Debug;
+use core::marker::PhantomData;
+use core::fmt::Debug;
 
 use particles::ParticleVec;
-use soa_derive::{SoAVec, SoASlice, StructOfArray};
+use layout::{SoAVec, SoASlice, SOA};
 
 use self::particles::Particle;
 
-fn may_iter<T: StructOfArray, V: SoAVec<T>>(vec: &V) -> V::Iter<'_> {
+fn may_iter<T: SOA, V: SoAVec<T>>(vec: &V) -> V::Iter<'_> {
     vec.iter()
 }
 
-fn may_push<T: StructOfArray, V: SoAVec<T>>(vec: &mut V, val: T) {
+fn may_push<T: SOA, V: SoAVec<T>>(vec: &mut V, val: T) {
     vec.push(val)
 }
 
-fn may_sort_generic<T: StructOfArray, V: SoAVec<T>>(vec: &mut V) where for<'t> V::Ref<'t> : PartialOrd {
+fn may_sort_generic<T: SOA, V: SoAVec<T>>(vec: &mut V) where for<'t> V::Ref<'t> : PartialOrd {
     let mut indices: Vec<_> = (0..vec.len()).collect();
 
     indices.sort_by(|j, k| {
@@ -31,7 +31,7 @@ fn may_sort_generic<T: StructOfArray, V: SoAVec<T>>(vec: &mut V) where for<'t> V
 }
 
 
-fn may_closure_sort<V: SoAVec<Particle>, F>(vec: &mut V, mut f: F) where F: FnMut(V::Ref<'_>, V::Ref<'_>) -> std::cmp::Ordering {
+fn may_closure_sort<V: SoAVec<Particle>, F>(vec: &mut V, mut f: F) where F: FnMut(V::Ref<'_>, V::Ref<'_>) -> core::cmp::Ordering {
     let mut indices: Vec<_> = (0..vec.len()).collect();
 
     indices.sort_by(|j, k| {
@@ -75,12 +75,12 @@ fn test_generic_type_behavior() {
 
 
 #[derive(Debug, Clone)]
-struct VecWrap<T: StructOfArray, V: SoAVec<T>> {
+struct VecWrap<T: SOA, V: SoAVec<T>> {
     data: V,
     marker: PhantomData<T>
 }
 
-impl<T: StructOfArray, V: SoAVec<T>> VecWrap<T, V> {
+impl<T: SOA, V: SoAVec<T>> VecWrap<T, V> {
     fn new() -> Self {
         Self {
             data: V::new(),
@@ -104,7 +104,7 @@ impl<T: StructOfArray, V: SoAVec<T>> VecWrap<T, V> {
         self.data.first()
     }
 
-    fn sort_by<F>(&mut self, f: F) where F: FnMut(V::Ref<'_>, V::Ref<'_>) -> std::cmp::Ordering {
+    fn sort_by<F>(&mut self, f: F) where F: FnMut(V::Ref<'_>, V::Ref<'_>) -> core::cmp::Ordering {
         self.data.sort_by(f);
     }
 }
@@ -123,7 +123,7 @@ fn test_wrapped() {
     assert_eq!(this.view().len(), 3);
 }
 
-fn iter_max_generic<'a, T: StructOfArray, V: SoASlice<T> + 'a>(vec: &'a V) -> Option<V::Ref<'a>>
+fn iter_max_generic<'a, T: SOA, V: SoASlice<T> + 'a>(vec: &'a V) -> Option<V::Ref<'a>>
 where
     V::Ref<'a>: PartialOrd + Debug
 {
@@ -137,7 +137,7 @@ where
     x
 }
 
-fn iter_max_generic_iter<'a, T: StructOfArray, V: SoAVec<T>>(it: V::Iter<'a>) -> Option<V::Ref<'a>>
+fn iter_max_generic_iter<'a, T: SOA, V: SoAVec<T>>(it: V::Iter<'a>) -> Option<V::Ref<'a>>
 where
     V::Ref<'a>: PartialOrd
 {
@@ -150,7 +150,7 @@ where
     })
 }
 
-fn slice_ref_len<T: StructOfArray, V: SoAVec<T>>(vec: &V) -> usize {
+fn slice_ref_len<T: SOA, V: SoAVec<T>>(vec: &V) -> usize {
     let view = vec.as_slice();
     let n = view.iter().count();
     assert_eq!(view.into_iter().count(), n);

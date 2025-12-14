@@ -1,11 +1,11 @@
 #![deny(warnings)]
 #![allow(clippy::float_cmp)]
 
-use soa_derive::StructOfArray;
+use layout::SOA;
 
 // This test checks that the derive code works even in some extreme cases
 
-#[derive(StructOfArray)]
+#[derive(SOA)]
 struct Private {
     inner: f64,
 }
@@ -18,12 +18,12 @@ fn private() {
 
 pub struct Empty;
 
-#[derive(StructOfArray)]
+#[derive(SOA)]
 pub struct NoTraits {
     inner: Empty,
 }
 
-#[derive(StructOfArray)]
+#[derive(SOA)]
 pub struct VeryBig {
     x: f64,
     y: f64,
@@ -36,7 +36,7 @@ pub struct VeryBig {
 
 // strange names used by variables inside the implementation.
 // This checks for hygiene in code generation
-#[derive(Debug, Clone, PartialEq, StructOfArray)]
+#[derive(Debug, Clone, PartialEq, SOA)]
 pub struct BadNames {
     pub index: String,
     pub at: String,
@@ -49,7 +49,7 @@ pub struct BadNames {
 }
 
 // Raw identifiers
-#[derive(Debug, Clone, PartialEq, StructOfArray)]
+#[derive(Debug, Clone, PartialEq, SOA)]
 pub struct RawIdent {
     pub r#for: String,
     pub r#in: String,

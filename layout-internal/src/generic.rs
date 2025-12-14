@@ -13,7 +13,7 @@ pub fn derive_slice(input: &Input) -> TokenStream {
     let iter_name = names::iter_name(name);
 
     let generated = quote! {
-        impl<'a> ::soa_derive::SoASlice<#name> for #slice_name<'a> {
+        impl<'a> ::layout::SoASlice<#name> for #slice_name<'a> {
             type Ref<'t>  = #ref_name<'t> where Self: 't, 'a: 't;
             type Slice<'t> = #slice_name<'t> where Self: 't, 'a: 't;
             type Iter<'t> = #iter_name<'t> where Self: 't, 'a: 't;
@@ -33,14 +33,14 @@ pub fn derive_slice(input: &Input) -> TokenStream {
 
             fn slice<'c, 'b: 'c>(&'c self, index: impl core::ops::RangeBounds<usize>) -> Self::Slice<'c> where Self: 'b {
                 let start = match index.start_bound() {
-                    std::ops::Bound::Included(i) | std::ops::Bound::Excluded(i) => *i,
-                    std::ops::Bound::Unbounded => 0,
+                    core::ops::Bound::Included(i) | core::ops::Bound::Excluded(i) => *i,
+                    core::ops::Bound::Unbounded => 0,
                 };
                 let n = self.len();
                 let end = match index.end_bound() {
-                    std::ops::Bound::Included(i) => (*i + 1).min(n),
-                    std::ops::Bound::Excluded(i) => *i,
-                    std::ops::Bound::Unbounded => n,
+                    core::ops::Bound::Included(i) => (*i + 1).min(n),
+                    core::ops::Bound::Excluded(i) => *i,
+                    core::ops::Bound::Unbounded => n,
                 };
                 self.index(start..end)
             }
@@ -79,7 +79,7 @@ pub fn derive_slice_mut(input: &Input) -> TokenStream {
 
     let generated = quote! {
 
-        impl<'a> ::soa_derive::SoASliceMut<#name> for #slice_mut_name<'a> {
+        impl<'a> ::layout::SoASliceMut<#name> for #slice_mut_name<'a> {
             type Ref<'t>  = #ref_name<'t> where Self: 't;
             type Slice<'t> = #slice_name<'t> where Self: 't;
             type Iter<'t> = #iter_name<'t> where Self: 't;
@@ -104,14 +104,14 @@ pub fn derive_slice_mut(input: &Input) -> TokenStream {
 
             fn slice<'c, 'b: 'c>(&'c self, index: impl core::ops::RangeBounds<usize>) -> Self::Slice<'c> where Self: 'b {
                 let start = match index.start_bound() {
-                    std::ops::Bound::Included(i) | std::ops::Bound::Excluded(i) => *i,
-                    std::ops::Bound::Unbounded => 0,
+                    core::ops::Bound::Included(i) | core::ops::Bound::Excluded(i) => *i,
+                    core::ops::Bound::Unbounded => 0,
                 };
                 let n = self.len();
                 let end = match index.end_bound() {
-                    std::ops::Bound::Included(i) => (*i + 1).min(n),
-                    std::ops::Bound::Excluded(i) => *i,
-                    std::ops::Bound::Unbounded => n,
+                    core::ops::Bound::Included(i) => (*i + 1).min(n),
+                    core::ops::Bound::Excluded(i) => *i,
+                    core::ops::Bound::Unbounded => n,
                 };
                 self.index(start..end)
             }
@@ -134,14 +134,14 @@ pub fn derive_slice_mut(input: &Input) -> TokenStream {
 
             fn slice_mut<'c>(&'c mut self, index: impl core::ops::RangeBounds<usize>) -> Self::SliceMut<'c> {
                 let start = match index.start_bound() {
-                    std::ops::Bound::Included(i) | std::ops::Bound::Excluded(i) => *i,
-                    std::ops::Bound::Unbounded => 0,
+                    core::ops::Bound::Included(i) | core::ops::Bound::Excluded(i) => *i,
+                    core::ops::Bound::Unbounded => 0,
                 };
                 let n = self.len();
                 let end = match index.end_bound() {
-                    std::ops::Bound::Included(i) => (*i + 1).min(n),
-                    std::ops::Bound::Excluded(i) => *i,
-                    std::ops::Bound::Unbounded => n,
+                    core::ops::Bound::Included(i) => (*i + 1).min(n),
+                    core::ops::Bound::Excluded(i) => *i,
+                    core::ops::Bound::Unbounded => n,
                 };
                 self.index_mut(start..end)
             }
@@ -159,7 +159,7 @@ pub fn derive_slice_mut(input: &Input) -> TokenStream {
             }
 
             fn apply_index(&mut self, indices: &[usize]) {
-                self.__private_apply_permutation(&mut ::soa_derive::Permutation::oneline(indices).inverse());
+                self.__private_apply_permutation(&mut ::layout::Permutation::oneline(indices).inverse());
             }
 
             fn as_ptr(&self) -> Self::Ptr {
@@ -189,7 +189,7 @@ pub fn derive_vec(input: &Input) -> TokenStream {
 
     let generated = quote! {
 
-        impl ::soa_derive::SoAVec<#name> for #vec_name {
+        impl ::layout::SoAVec<#name> for #vec_name {
             type Ref<'t> = #ref_name<'t>;
             type Slice<'t> = #slice_name<'t>;
             type Iter<'t> = #iter_name<'t>;
@@ -214,14 +214,14 @@ pub fn derive_vec(input: &Input) -> TokenStream {
 
             fn slice<'c, 'a: 'c>(&'c self, index: impl core::ops::RangeBounds<usize>) -> Self::Slice<'c> where Self: 'a {
                 let start = match index.start_bound() {
-                    std::ops::Bound::Included(i) | std::ops::Bound::Excluded(i) => *i,
-                    std::ops::Bound::Unbounded => 0,
+                    core::ops::Bound::Included(i) | core::ops::Bound::Excluded(i) => *i,
+                    core::ops::Bound::Unbounded => 0,
                 };
                 let n = self.len();
                 let end = match index.end_bound() {
-                    std::ops::Bound::Included(i) => (*i + 1).min(n),
-                    std::ops::Bound::Excluded(i) => *i,
-                    std::ops::Bound::Unbounded => n,
+                    core::ops::Bound::Included(i) => (*i + 1).min(n),
+                    core::ops::Bound::Excluded(i) => *i,
+                    core::ops::Bound::Unbounded => n,
                 };
                 self.index(start..end)
             }
@@ -244,14 +244,14 @@ pub fn derive_vec(input: &Input) -> TokenStream {
 
             fn slice_mut<'c>(&'c mut self, index: impl core::ops::RangeBounds<usize>) -> Self::SliceMut<'c> {
                 let start = match index.start_bound() {
-                    std::ops::Bound::Included(i) | std::ops::Bound::Excluded(i) => *i,
-                    std::ops::Bound::Unbounded => 0,
+                    core::ops::Bound::Included(i) | core::ops::Bound::Excluded(i) => *i,
+                    core::ops::Bound::Unbounded => 0,
                 };
                 let n = self.len();
                 let end = match index.end_bound() {
-                    std::ops::Bound::Included(i) => (*i + 1).min(n),
-                    std::ops::Bound::Excluded(i) => *i,
-                    std::ops::Bound::Unbounded => n,
+                    core::ops::Bound::Included(i) => (*i + 1).min(n),
+                    core::ops::Bound::Excluded(i) => *i,
+                    core::ops::Bound::Unbounded => n,
                 };
                 self.index_mut(start..end)
             }
@@ -269,16 +269,16 @@ pub fn derive_vec(input: &Input) -> TokenStream {
             }
 
             fn apply_index(&mut self, indices: &[usize]) {
-                use ::soa_derive::SoASliceMut;
+                use ::layout::SoASliceMut;
                 self.as_mut_slice().apply_index(indices);
             }
 
             fn new() -> Self {
-                Self::new()
+                #vec_name::new()
             }
 
             fn with_capacity(capacity: usize) -> Self {
-                Self::with_capacity(capacity)
+                #vec_name::with_capacity(capacity)
             }
 
             fn capacity(&self) -> usize {

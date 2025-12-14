@@ -4,6 +4,9 @@ use quote::quote;
 
 use crate::input::Input;
 use crate::names;
+extern crate alloc;
+use alloc::format;
+use alloc::vec::Vec;
 
 pub fn derive(input: &Input) -> TokenStream {
     let name = &input.name;
@@ -26,7 +29,7 @@ pub fn derive(input: &Input) -> TokenStream {
 
     let fields_names_hygienic = input.fields.iter()
         .enumerate()
-        .map(|(i, _)| Ident::new(&format!("___soa_derive_private_{}", i), Span::call_site()))
+        .map(|(i, _)| Ident::new(&format!("___layout_private_{}", i), Span::call_site()))
         .collect::<Vec<_>>();
 
     let first_field = &fields_names[0];
@@ -40,7 +43,7 @@ pub fn derive(input: &Input) -> TokenStream {
     ).collect::<Vec<_>>();
 
     let vec_with_capacity = input.map_fields_nested_or(
-        |_, field_type| quote! { <#field_type as StructOfArray>::Type::with_capacity(capacity) },
+        |_, field_type| quote! { <#field_type as SOA>::Type::with_capacity(capacity) },
         |_, _| quote! { Vec::with_capacity(capacity) },
     ).collect::<Vec<_>>();
 
@@ -64,7 +67,7 @@ pub fn derive(input: &Input) -> TokenStream {
 
     let vec_replace = input.map_fields_nested_or(
         |ident, _| quote! { self.#ident.replace(index, field) },
-        |ident, _| quote! { ::std::mem::replace(&mut self.#ident[index], field) },
+        |ident, _| quote! { ::core::mem::replace(&mut self.#ident[index], field) },
     ).collect::<Vec<_>>();
 
     let mut generated = quote! {
@@ -154,11 +157,11 @@ pub fn derive(input: &Input) -> TokenStream {
                 // We need to use ptr read/write instead of moving out of the
                 // fields in case the value struct implements Drop.
                 unsafe {
-                    #(self.#fields_names.push(::std::ptr::read(&value.#fields_names));)*
+                    #(self.#fields_names.push(::core::ptr::read(&value.#fields_names));)*
                 }
                 // if value implements Drop, we don't want to run it here, only
                 // when the vec itself will be dropped.
-                ::std::mem::forget(value);
+                ::core::mem::forget(value);
             }
 
             /// Similar to [`
@@ -203,14 +206,14 @@ pub fn derive(input: &Input) -> TokenStream {
                 // similar to push, we can not use move and have to rely on ptr
                 // read/write
                 unsafe {
-                    #(self.#fields_names.insert(index, ::std::ptr::read(&element.#fields_names));)*
+                    #(self.#fields_names.insert(index, ::core::ptr::read(&element.#fields_names));)*
                 }
                 // if value implements Drop, we don't want to run it here, only
                 // when the vec itself will be dropped.
-                ::std::mem::forget(element);
+                ::core::mem::forget(element);
             }
 
-            /// Similar to [`std::mem::replace()`](https://doc.rust-lang.org/std/mem/fn.replace.html).
+            /// Similar to [`core::mem::replace()`](https://doc.rust-lang.org/std/mem/fn.replace.html).
             #[allow(clippy::forget_non_drop)]
             pub fn replace(&mut self, index: usize, element: #name) -> #name {
                 if index >= self.len() {
@@ -220,12 +223,12 @@ pub fn derive(input: &Input) -> TokenStream {
                 // similar to push, we can not use move and have to rely on ptr
                 // read/write
                 #(
-                    let field = unsafe { ::std::ptr::read(&element.#fields_names) };
+                    let field = unsafe { ::core::ptr::read(&element.#fields_names) };
                     let #fields_names_hygienic = #vec_replace;
                 )*
                 // if value implements Drop, we don't want to run it here, only
                 // when the vec itself will be dropped.
-                ::std::mem::forget(element);
+                ::core::mem::forget(element);
 
                 #name{#(#fields_names: #fields_names_hygienic),*}
             }
@@ -299,7 +302,7 @@ pub fn derive(input: &Input) -> TokenStream {
 
             /// Create a slice of this vector matching the given `range`. This
             /// is analogous to `Index<Range<usize>>`.
-            pub fn slice(&self, range: ::std::ops::Range<usize>) -> #slice_name {
+            pub fn slice(&self, range: ::core::ops::Range<usize>) -> #slice_name {
                 #slice_name {
                     #( #fields_names: #vec_slice, )*
                 }
@@ -307,7 +310,7 @@ pub fn derive(input: &Input) -> TokenStream {
 
             /// Create a mutable slice of this vector matching the given
             /// `range`. This is analogous to `IndexMut<Range<usize>>`.
-            pub fn slice_mut(&mut self, range: ::std::ops::Range<usize>) -> #slice_mut_name {
+            pub fn slice_mut(&mut self, range: ::core::ops::Range<usize>) -> #slice_mut_name {
                 #slice_mut_name {
                     #( #fields_names: #vec_slice_mut, )*
                 }
@@ -364,7 +367,7 @@ pub fn derive(input: &Input) -> TokenStream {
             /// ::get<I>()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.get).
             pub fn get<'a, I>(&'a self, index: I) -> Option<I::RefOutput>
             where
-                I: ::soa_derive::SoAIndex<&'a #vec_name>
+                I: ::layout::SoAIndex<&'a #vec_name>
             {
                 index.get(self)
             }
@@ -374,7 +377,7 @@ pub fn derive(input: &Input) -> TokenStream {
             /// ::get_unchecked<I>()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.get_unchecked).
             pub unsafe fn get_unchecked<'a, I>(&'a self, index: I) -> I::RefOutput
             where
-                I: ::soa_derive::SoAIndex<&'a #vec_name>
+                I: ::layout::SoAIndex<&'a #vec_name>
             {
                 index.get_unchecked(self)
             }
@@ -384,7 +387,7 @@ pub fn derive(input: &Input) -> TokenStream {
             /// ::index<I>()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.index).
             pub fn index<'a, I>(&'a self, index: I) -> I::RefOutput
             where
-                I: ::soa_derive::SoAIndex<&'a #vec_name>
+                I: ::layout::SoAIndex<&'a #vec_name>
             {
                 index.index(self)
             }
@@ -394,7 +397,7 @@ pub fn derive(input: &Input) -> TokenStream {
             /// ::get_mut<I>()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.get_mut).
             pub fn get_mut<'a, I>(&'a mut self, index: I) -> Option<I::MutOutput>
             where
-                I: ::soa_derive::SoAIndexMut<&'a mut #vec_name>
+                I: ::layout::SoAIndexMut<&'a mut #vec_name>
             {
                 index.get_mut(self)
             }
@@ -404,7 +407,7 @@ pub fn derive(input: &Input) -> TokenStream {
             /// ::get_unchecked_mut<I>()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.get_unchecked_mut).
             pub unsafe fn get_unchecked_mut<'a, I>(&'a mut self, index: I) -> I::MutOutput
             where
-                I: ::soa_derive::SoAIndexMut<&'a mut #vec_name>
+                I: ::layout::SoAIndexMut<&'a mut #vec_name>
             {
                 index.get_unchecked_mut(self)
             }
@@ -414,7 +417,7 @@ pub fn derive(input: &Input) -> TokenStream {
             /// ::index_mut<I>()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.index_mut).
             pub fn index_mut<'a, I>(&'a mut self, index: I) -> I::MutOutput
             where
-                I: ::soa_derive::SoAIndexMut<&'a mut #vec_name>
+                I: ::layout::SoAIndexMut<&'a mut #vec_name>
             {
                 index.index_mut(self)
             }
@@ -451,7 +454,7 @@ pub fn derive(input: &Input) -> TokenStream {
         impl Drop for #vec_name {
             fn drop(&mut self) {
                 while let Some(value) = self.pop() {
-                    ::std::mem::drop(value);
+                    ::core::mem::drop(value);
                 }
             }
         }
@@ -471,7 +474,7 @@ pub fn derive(input: &Input) -> TokenStream {
                 }
             }
 
-            impl ::soa_derive::SoAAppendVec<#name> for #vec_name {
+            impl ::layout::SoAAppendVec<#name> for #vec_name {
                 fn extend_from_slice(&mut self, other: Self::Slice<'_>) {
                     #(
                         self.#fields_names.extend_from_slice(other.#fields_names);

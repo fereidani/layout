@@ -21,9 +21,9 @@ mod generic;
 
 pub(crate) mod names;
 
-#[proc_macro_derive(StructOfArray, attributes(soa_derive, soa_attr, nested_soa))]
-pub fn soa_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let ast = syn::parse(input).expect("Failed to parse derive macro for StructOfArray");
+#[proc_macro_derive(SOA, attributes(layout, soa_attr, nested_soa))]
+pub fn layout(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let ast = syn::parse(input).expect("Failed to parse derive macro for SOA");
     let input = input::Input::new(ast);
 
     let mut generated = TokenStream::new();
@@ -50,7 +50,7 @@ fn derive_trait(input: &Input) -> TokenStream {
     let vec_name = names::vec_name(name);
 
     quote! {
-        impl soa_derive::StructOfArray for #name {
+        impl layout::SOA for #name {
             type Type = #vec_name;
         }
     }

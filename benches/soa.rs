@@ -1,10 +1,10 @@
 #![allow(clippy::needless_return)]
 
-use soa_derive::StructOfArray;
+use layout::SOA;
 
 use bencher::{Bencher, benchmark_group, benchmark_main};
 
-#[derive(StructOfArray)]
+#[derive(SOA)]
 pub struct Small {
     x: f64,
     y: f64,
@@ -37,7 +37,7 @@ impl Small {
     }
 }
 
-#[derive(StructOfArray)]
+#[derive(SOA)]
 pub struct Big {
     position: (f64, f64, f64),
     velocity: (f64, f64, f64),
