@@ -1,5 +1,4 @@
 #![warn(clippy::all, clippy::pedantic)]
-
 #![allow(clippy::needless_return, clippy::redundant_field_names)]
 #![allow(clippy::use_self, clippy::too_many_lines, clippy::missing_panics_doc)]
 #![allow(clippy::uninlined_format_args)]
@@ -12,12 +11,12 @@ use quote::TokenStreamExt;
 mod index;
 #[macro_use]
 mod input;
+mod generic;
 mod iter;
 mod ptr;
 mod refs;
 mod slice;
 mod vec;
-mod generic;
 
 pub(crate) mod names;
 
@@ -42,8 +41,9 @@ pub fn layout(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     generated.into()
 }
 
-use crate::input::Input;
 use quote::quote;
+
+use crate::input::Input;
 
 fn derive_trait(input: &Input) -> TokenStream {
     let name = &input.name;

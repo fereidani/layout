@@ -1,8 +1,7 @@
 #![allow(clippy::needless_return)]
 
+use bencher::{benchmark_group, benchmark_main, Bencher};
 use layout::SOA;
-
-use bencher::{Bencher, benchmark_group, benchmark_main};
 
 #[derive(SOA)]
 pub struct Small {
@@ -43,7 +42,7 @@ pub struct Big {
     velocity: (f64, f64, f64),
     data: [usize; 18],
     name: String,
-    userdata: String
+    userdata: String,
 }
 
 impl Big {
@@ -53,7 +52,7 @@ impl Big {
             velocity: (1.0, 0.2, -2.3),
             data: [67; 18],
             name: "foo".into(),
-            userdata: "bar".into()
+            userdata: "bar".into(),
         }
     }
 
@@ -76,35 +75,27 @@ impl Big {
 
 fn aos_small_push(bencher: &mut Bencher) {
     let mut vec = Vec::new();
-    bencher.iter(||{
-        vec.push(Small::new())
-    })
+    bencher.iter(|| vec.push(Small::new()))
 }
 
 fn soa_small_push(bencher: &mut Bencher) {
     let mut vec = SmallVec::new();
-    bencher.iter(||{
-        vec.push(Small::new())
-    })
+    bencher.iter(|| vec.push(Small::new()))
 }
 
 fn aos_big_push(bencher: &mut Bencher) {
     let mut vec = Vec::new();
-    bencher.iter(||{
-        vec.push(Big::new())
-    })
+    bencher.iter(|| vec.push(Big::new()))
 }
 
 fn soa_big_push(bencher: &mut Bencher) {
     let mut vec = BigVec::new();
-    bencher.iter(||{
-        vec.push(Big::new())
-    })
+    bencher.iter(|| vec.push(Big::new()))
 }
 
 fn aos_small_do_work_100k(bencher: &mut Bencher) {
     let vec = Small::aos_vec(100_000);
-    bencher.iter(||{
+    bencher.iter(|| {
         let mut s = 0.0;
         for v in &vec {
             s += v.x + v.y;
@@ -115,7 +106,7 @@ fn aos_small_do_work_100k(bencher: &mut Bencher) {
 
 fn soa_small_do_work_100k(bencher: &mut Bencher) {
     let vec = Small::soa_vec(100_000);
-    bencher.iter(||{
+    bencher.iter(|| {
         let mut s = 0.0;
         for (x, y) in vec.x.iter().zip(&vec.y) {
             s += x + y;
@@ -126,7 +117,7 @@ fn soa_small_do_work_100k(bencher: &mut Bencher) {
 
 fn aos_big_do_work_10k(bencher: &mut Bencher) {
     let vec = Big::aos_vec(10_000);
-    bencher.iter(||{
+    bencher.iter(|| {
         let mut s = 0.0;
         for v in &vec {
             s += v.position.0 + v.velocity.0 * 0.1;
@@ -137,7 +128,7 @@ fn aos_big_do_work_10k(bencher: &mut Bencher) {
 
 fn aos_big_do_work_100k(bencher: &mut Bencher) {
     let vec = Big::aos_vec(100_000);
-    bencher.iter(||{
+    bencher.iter(|| {
         let mut s = 0.0;
         for v in &vec {
             s += v.position.0 + v.velocity.0 * 0.1;
@@ -148,7 +139,7 @@ fn aos_big_do_work_100k(bencher: &mut Bencher) {
 
 fn soa_big_do_work_10k(bencher: &mut Bencher) {
     let vec = Big::soa_vec(10_000);
-    bencher.iter(||{
+    bencher.iter(|| {
         let mut s = 0.0;
         for (position, velocity) in vec.position.iter().zip(&vec.velocity) {
             s += position.0 + velocity.0;
@@ -159,7 +150,7 @@ fn soa_big_do_work_10k(bencher: &mut Bencher) {
 
 fn soa_big_do_work_100k(bencher: &mut Bencher) {
     let vec = Big::soa_vec(100_000);
-    bencher.iter(||{
+    bencher.iter(|| {
         let mut s = 0.0;
         for (position, velocity) in vec.position.iter().zip(&vec.velocity) {
             s += position.0 + velocity.0;
@@ -170,7 +161,7 @@ fn soa_big_do_work_100k(bencher: &mut Bencher) {
 
 fn soa_big_do_work_simple_100k(bencher: &mut Bencher) {
     let vec = Big::soa_vec(100_000);
-    bencher.iter(||{
+    bencher.iter(|| {
         let mut s = 0.0;
         for elem in vec.iter() {
             s += elem.position.0 + elem.velocity.0;
@@ -179,13 +170,21 @@ fn soa_big_do_work_simple_100k(bencher: &mut Bencher) {
     })
 }
 
-
-benchmark_group!(aos,
-    aos_small_push, aos_big_push, aos_small_do_work_100k, aos_big_do_work_10k,
+benchmark_group!(
+    aos,
+    aos_small_push,
+    aos_big_push,
+    aos_small_do_work_100k,
+    aos_big_do_work_10k,
     aos_big_do_work_100k
 );
-benchmark_group!(soa,
-    soa_small_push, soa_big_push, soa_small_do_work_100k, soa_big_do_work_10k,
-    soa_big_do_work_100k, soa_big_do_work_simple_100k,
+benchmark_group!(
+    soa,
+    soa_small_push,
+    soa_big_push,
+    soa_small_do_work_100k,
+    soa_big_do_work_10k,
+    soa_big_do_work_100k,
+    soa_big_do_work_simple_100k,
 );
 benchmark_main!(soa, aos);

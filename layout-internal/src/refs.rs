@@ -1,8 +1,7 @@
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
 
-use crate::input::Input;
-use crate::names;
+use crate::{input::Input, names};
 
 pub fn derive(input: &Input) -> TokenStream {
     let name = &input.name;
@@ -13,7 +12,9 @@ pub fn derive(input: &Input) -> TokenStream {
     let ref_name = names::ref_name(&input.name);
     let ref_mut_name = names::ref_mut_name(&input.name);
 
-    let fields_types = &input.fields.iter()
+    let fields_types = &input
+        .fields
+        .iter()
         .map(|field| field.ty.clone())
         .collect::<Vec<_>>();
 
@@ -22,50 +23,66 @@ pub fn derive(input: &Input) -> TokenStream {
     let ref_doc_url = format!("[`{0}`](struct.{0}.html)", ref_name);
     let ref_mut_doc_url = format!("[`{0}`](struct.{0}.html)", ref_mut_name);
 
-    let fields_names = &input.fields.iter()
+    let fields_names = &input
+        .fields
+        .iter()
         .map(|field| field.ident.clone().unwrap())
         .collect::<Vec<_>>();
 
-    let fields_names_hygienic = input.fields.iter()
+    let fields_names_hygienic = input
+        .fields
+        .iter()
         .enumerate()
         .map(|(i, _)| Ident::new(&format!("___layout_private_{}", i), Span::call_site()))
         .collect::<Vec<_>>();
 
-    let ref_fields_types = input.map_fields_nested_or(
-        |_, field_type| {
-            let field_ptr_type = names::ref_name(field_type);
-            quote! { #field_ptr_type<'a> }
-        },
-        |_, field_type| quote! { &'a #field_type },
-    ).collect::<Vec<_>>();
+    let ref_fields_types = input
+        .map_fields_nested_or(
+            |_, field_type| {
+                let field_ptr_type = names::ref_name(field_type);
+                quote! { #field_ptr_type<'a> }
+            },
+            |_, field_type| quote! { &'a #field_type },
+        )
+        .collect::<Vec<_>>();
 
-    let ref_mut_fields_types = input.map_fields_nested_or(
-        |_, field_type| {
-            let field_ptr_type = names::ref_mut_name(field_type);
-            quote! { #field_ptr_type<'a> }
-        },
-        |_, field_type| quote! { &'a mut #field_type },
-    ).collect::<Vec<_>>();
+    let ref_mut_fields_types = input
+        .map_fields_nested_or(
+            |_, field_type| {
+                let field_ptr_type = names::ref_mut_name(field_type);
+                quote! { #field_ptr_type<'a> }
+            },
+            |_, field_type| quote! { &'a mut #field_type },
+        )
+        .collect::<Vec<_>>();
 
-    let as_ref = input.map_fields_nested_or(
-        |ident, _| quote! { self.#ident.as_ref() },
-        |ident, _| quote! { &self.#ident },
-    ).collect::<Vec<_>>();
+    let as_ref = input
+        .map_fields_nested_or(
+            |ident, _| quote! { self.#ident.as_ref() },
+            |ident, _| quote! { &self.#ident },
+        )
+        .collect::<Vec<_>>();
 
-    let as_mut = input.map_fields_nested_or(
-        |ident, _| quote! { self.#ident.as_mut() },
-        |ident, _| quote! { &mut self.#ident },
-    ).collect::<Vec<_>>();
+    let as_mut = input
+        .map_fields_nested_or(
+            |ident, _| quote! { self.#ident.as_mut() },
+            |ident, _| quote! { &mut self.#ident },
+        )
+        .collect::<Vec<_>>();
 
-    let to_owned = input.map_fields_nested_or(
-        |ident, _| quote! { self.#ident.to_owned() },
-        |ident, _| quote! { self.#ident.clone() },
-    ).collect::<Vec<_>>();
+    let to_owned = input
+        .map_fields_nested_or(
+            |ident, _| quote! { self.#ident.to_owned() },
+            |ident, _| quote! { self.#ident.clone() },
+        )
+        .collect::<Vec<_>>();
 
-    let ref_replace = input.map_fields_nested_or(
-        |ident, _| quote! { self.#ident.replace(field) },
-        |ident, _| quote! { ::core::mem::replace(&mut *self.#ident, field) },
-    ).collect::<Vec<_>>();
+    let ref_replace = input
+        .map_fields_nested_or(
+            |ident, _| quote! { self.#ident.replace(field) },
+            |ident, _| quote! { ::core::mem::replace(&mut *self.#ident, field) },
+        )
+        .collect::<Vec<_>>();
 
     quote! {
         /// A reference to a

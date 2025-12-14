@@ -1,8 +1,10 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use crate::input::{Input, TokenStreamIterator};
-use crate::names;
+use crate::{
+    input::{Input, TokenStreamIterator},
+    names,
+};
 
 pub fn derive(input: &Input) -> TokenStream {
     let name = &input.name;
@@ -19,65 +21,86 @@ pub fn derive(input: &Input) -> TokenStream {
     let ref_doc_url = format!("[`{0}`](struct.{0}.html)", ref_name);
     let ref_mut_doc_url = format!("[`{0}`](struct.{0}.html)", ref_mut_name);
 
-    let fields_names = &input.fields.iter()
+    let fields_names = &input
+        .fields
+        .iter()
         .map(|field| field.ident.clone().unwrap())
         .collect::<Vec<_>>();
 
-    let fields_types = &input.fields.iter()
+    let fields_types = &input
+        .fields
+        .iter()
         .map(|field| field.ty.clone())
         .collect::<Vec<_>>();
 
-    let iter_type = input.map_fields_nested_or(
-        |_, field_type| quote! { <#field_type as layout::SoAIter<'a>>::Iter },
-        |_, field_type| quote! { ::core::slice::Iter<'a, #field_type> },
-    ).concat_by(
-        |seq, next| { quote! { ::core::iter::Zip<#seq, #next> } }
-    );
+    let iter_type = input
+        .map_fields_nested_or(
+            |_, field_type| quote! { <#field_type as layout::SoAIter<'a>>::Iter },
+            |_, field_type| quote! { ::core::slice::Iter<'a, #field_type> },
+        )
+        .concat_by(|seq, next| {
+            quote! { ::core::iter::Zip<#seq, #next> }
+        });
 
-    let iter_mut_type = input.map_fields_nested_or(
-        |_, field_type| quote! { <#field_type as layout::SoAIter<'a>>::IterMut },
-        |_, field_type| quote! { ::core::slice::IterMut<'a, #field_type> },
-    ).concat_by(
-        |seq, next| { quote! { ::core::iter::Zip<#seq, #next> } }
-    );
+    let iter_mut_type = input
+        .map_fields_nested_or(
+            |_, field_type| quote! { <#field_type as layout::SoAIter<'a>>::IterMut },
+            |_, field_type| quote! { ::core::slice::IterMut<'a, #field_type> },
+        )
+        .concat_by(|seq, next| {
+            quote! { ::core::iter::Zip<#seq, #next> }
+        });
 
-    let create_into_iter = input.map_fields_nested_or(
-        |ident, _| quote! { self.#ident.into_iter() },
-        |ident, _| quote! { self.#ident.iter() },
-    ).concat_by(
-        |seq, next| { quote! { #seq.zip(#next) } }
-    );
+    let create_into_iter = input
+        .map_fields_nested_or(
+            |ident, _| quote! { self.#ident.into_iter() },
+            |ident, _| quote! { self.#ident.iter() },
+        )
+        .concat_by(|seq, next| {
+            quote! { #seq.zip(#next) }
+        });
 
-    let create_mut_into_iter = input.map_fields_nested_or(
-        |ident, _| quote! { self.#ident.into_iter() },
-        |ident, _| quote! { self.#ident.iter_mut() },
-    ).concat_by(
-        |seq, next| { quote! { #seq.zip(#next) } }
-    );
+    let create_mut_into_iter = input
+        .map_fields_nested_or(
+            |ident, _| quote! { self.#ident.into_iter() },
+            |ident, _| quote! { self.#ident.iter_mut() },
+        )
+        .concat_by(|seq, next| {
+            quote! { #seq.zip(#next) }
+        });
 
-    let iter_pat = fields_names.iter().fold(None, |seq, ident| {
-        if let Some(seq) = seq {
-            Some(quote! { (#seq, #ident) })
-        } else {
-            Some(quote!{ #ident })
-        }
-    }).expect("should be Some");
+    let iter_pat = fields_names
+        .iter()
+        .fold(None, |seq, ident| {
+            if let Some(seq) = seq {
+                Some(quote! { (#seq, #ident) })
+            } else {
+                Some(quote! { #ident })
+            }
+        })
+        .expect("should be Some");
 
-    let create_iter = fields_names.iter().fold(None, |seq, ident| {
-        if let Some(seq) = seq {
-            Some(quote! { #seq.zip(self.#ident.iter()) })
-        } else {
-            Some(quote! { self.#ident.iter() })
-        }
-    }).expect("should be Some");
+    let create_iter = fields_names
+        .iter()
+        .fold(None, |seq, ident| {
+            if let Some(seq) = seq {
+                Some(quote! { #seq.zip(self.#ident.iter()) })
+            } else {
+                Some(quote! { self.#ident.iter() })
+            }
+        })
+        .expect("should be Some");
 
-    let create_iter_mut = fields_names.iter().fold(None, |seq, ident| {
-        if let Some(seq) = seq {
-            Some(quote! { #seq.zip(self.#ident.iter_mut()) })
-        } else {
-            Some(quote! { self.#ident.iter_mut() })
-        }
-    }).expect("should be Some");
+    let create_iter_mut = fields_names
+        .iter()
+        .fold(None, |seq, ident| {
+            if let Some(seq) = seq {
+                Some(quote! { #seq.zip(self.#ident.iter_mut()) })
+            } else {
+                Some(quote! { self.#ident.iter_mut() })
+            }
+        })
+        .expect("should be Some");
 
     let generated = quote! {
         /// Iterator over

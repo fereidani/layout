@@ -25,7 +25,9 @@ fn replace_mutable_reference() {
     soa.push(Particle::new(String::from("Zn"), 65.380));
     soa.push(Particle::new(String::from("Cl"), 35.453));
 
-    let particle = soa.index_mut(1).replace(Particle::new(String::from("Br"), 79.904));
+    let particle = soa
+        .index_mut(1)
+        .replace(Particle::new(String::from("Br"), 79.904));
     assert_eq!(particle.name, "Zn");
     assert_eq!(particle.mass, 65.380);
 

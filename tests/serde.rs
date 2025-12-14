@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use layout::SOA;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, SOA)]
 #[layout(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -10,10 +10,7 @@ pub struct Particle {
 
 impl Particle {
     pub fn new(name: String, mass: f64) -> Self {
-        Particle {
-            name,
-            mass,
-        }
+        Particle { name, mass }
     }
 }
 

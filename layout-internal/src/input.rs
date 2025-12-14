@@ -1,9 +1,9 @@
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
-
-use syn::punctuated::Punctuated;
-use syn::{Attribute, Data, DeriveInput, Field, Path, Token, Visibility};
-use syn::{Meta, MetaList};
+use syn::{
+    punctuated::Punctuated, Attribute, Data, DeriveInput, Field, Meta, MetaList, Path, Token,
+    Visibility,
+};
 
 /// Representing the struct we are deriving
 pub struct Input {
@@ -62,7 +62,7 @@ impl ExtraAttributes {
         let derive = Meta::List(MetaList {
             path: Path::from(syn::Ident::new("derive", Span::call_site())),
             delimiter: syn::MacroDelimiter::Paren(syn::token::Paren(Span::call_site())),
-            tokens: quote!{ #ident },
+            tokens: quote! { #ident },
         });
 
         if !derive_only_vec(ident) {
@@ -106,7 +106,10 @@ impl Input {
             _ => panic!("#[derive(SOA)] only supports struct"),
         };
 
-        assert!(!fields.is_empty(), "#[derive(SOA)] only supports struct with fields");
+        assert!(
+            !fields.is_empty(),
+            "#[derive(SOA)] only supports struct with fields"
+        );
 
         let mut extra_attrs = ExtraAttributes::new();
 
@@ -129,13 +132,18 @@ impl Input {
                         }
                     }
                     Ok(())
-                }).expect("failed to parse layout");
+                })
+                .expect("failed to parse layout");
             }
 
             if attr.path().is_ident("soa_attr") {
-                let nested = attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)
+                let nested = attr
+                    .parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)
                     .expect("expected attribute like #[soa_attr(<Type>, <attr>)]");
-                assert!(nested.len() == 2, "expected attribute like #[soa_attr(<Type>, <attr>)]");
+                assert!(
+                    nested.len() == 2,
+                    "expected attribute like #[soa_attr(<Type>, <attr>)]"
+                );
 
                 let soa_type = nested.first().expect("should have 2 elements");
                 let attr = nested.last().expect("should have 2 elements").clone();
@@ -160,7 +168,7 @@ impl Input {
                             panic!("expected one of the SoA type, got {}", quote!(#soa_type));
                         }
                     }
-                    None => panic!("expected one of the SoA type, got {}", quote!(#soa_type))
+                    None => panic!("expected one of the SoA type, got {}", quote!(#soa_type)),
                 }
             }
         }
@@ -176,33 +184,43 @@ impl Input {
 
     /// Map over all fields in the struct, calling the first function if the
     /// field is a nested struct of array, the second function otherwise
-    pub(crate) fn map_fields_nested_or<'a, A, B>(&'a self, nested: A, not_nested: B) -> impl TokenStreamIterator + 'a
-        where A: Fn(&syn::Ident, &syn::Type) -> TokenStream + 'a,
-              B: Fn(&syn::Ident, &syn::Type) -> TokenStream + 'a,
+    pub(crate) fn map_fields_nested_or<'a, A, B>(
+        &'a self,
+        nested: A,
+        not_nested: B,
+    ) -> impl TokenStreamIterator + 'a
+    where
+        A: Fn(&syn::Ident, &syn::Type) -> TokenStream + 'a,
+        B: Fn(&syn::Ident, &syn::Type) -> TokenStream + 'a,
     {
-        self.fields.iter().zip(self.field_is_nested.iter()).map(move |(field, &is_nested)| {
-            if is_nested {
-                nested(field.ident.as_ref().expect("missing ident"), &field.ty)
-            } else {
-                not_nested(field.ident.as_ref().expect("missing ident"), &field.ty)
-            }
-        })
+        self.fields
+            .iter()
+            .zip(self.field_is_nested.iter())
+            .map(move |(field, &is_nested)| {
+                if is_nested {
+                    nested(field.ident.as_ref().expect("missing ident"), &field.ty)
+                } else {
+                    not_nested(field.ident.as_ref().expect("missing ident"), &field.ty)
+                }
+            })
     }
 }
 
 pub(crate) trait TokenStreamIterator: Iterator<Item = proc_macro2::TokenStream> {
-    fn concat_by(self, f: impl Fn(proc_macro2::TokenStream, proc_macro2::TokenStream) -> proc_macro2::TokenStream) -> proc_macro2::TokenStream;
+    fn concat_by(
+        self,
+        f: impl Fn(proc_macro2::TokenStream, proc_macro2::TokenStream) -> proc_macro2::TokenStream,
+    ) -> proc_macro2::TokenStream;
 }
 
 impl<T: Iterator<Item = proc_macro2::TokenStream>> TokenStreamIterator for T {
-    fn concat_by(mut self, f: impl Fn(proc_macro2::TokenStream, proc_macro2::TokenStream) -> proc_macro2::TokenStream) -> proc_macro2::TokenStream {
+    fn concat_by(
+        mut self,
+        f: impl Fn(proc_macro2::TokenStream, proc_macro2::TokenStream) -> proc_macro2::TokenStream,
+    ) -> proc_macro2::TokenStream {
         match self.next() {
-            Some(first) => {
-                self.fold(first, |current, next| {
-                    f(current, next)
-                })
-            },
-            None => quote!{},
+            Some(first) => self.fold(first, |current, next| f(current, next)),
+            None => quote! {},
         }
     }
 }
@@ -213,9 +231,15 @@ mod tests {
 
     #[test]
     fn concat_by() {
-        let token_streams = vec![quote!{a}, quote!{b}, quote!{c}];
-        assert_eq!(token_streams.into_iter().concat_by(|current, next| {
-            quote!{(#current, #next)}
-        }).to_string(), "((a , b) , c)");
+        let token_streams = vec![quote! {a}, quote! {b}, quote! {c}];
+        assert_eq!(
+            token_streams
+                .into_iter()
+                .concat_by(|current, next| {
+                    quote! {(#current, #next)}
+                })
+                .to_string(),
+            "((a , b) , c)"
+        );
     }
 }

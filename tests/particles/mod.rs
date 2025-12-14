@@ -1,6 +1,7 @@
 use core::fmt::Debug;
-use layout::*;
+
 use itertools::Itertools;
+use layout::*;
 
 #[derive(Debug, Clone, PartialOrd, PartialEq, SOA)]
 #[layout(Debug, Clone, PartialOrd, PartialEq)]
@@ -11,10 +12,7 @@ pub struct Particle {
 
 impl Particle {
     pub fn new(name: String, mass: f64) -> Self {
-        Particle {
-            name,
-            mass,
-        }
+        Particle { name, mass }
     }
 }
 
@@ -28,6 +26,6 @@ impl ParticleVec {
 #[test]
 fn use_iterator_tools_get() {
     let vec = ParticleVec::new();
-    let particle = vec.iter().get(..0).find_or_first(|_|true);
+    let particle = vec.iter().get(..0).find_or_first(|_| true);
     assert_eq!(particle, None);
 }

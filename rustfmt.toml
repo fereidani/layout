@@ -1,1 +1,3 @@
-disable_all_formatting = true
+wrap_comments = true
+imports_granularity = "Crate"
+group_imports = "StdExternalCrate"

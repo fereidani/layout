@@ -12,7 +12,7 @@ struct Private {
 
 #[test]
 fn private() {
-    let p = Private {inner: 42.0};
+    let p = Private { inner: 42.0 };
     assert_eq!(p.inner, 42.0);
 }
 

@@ -1,10 +1,8 @@
 use proc_macro2::{Span, TokenStream};
+use quote::{quote, TokenStreamExt};
 use syn::Ident;
-use quote::TokenStreamExt;
-use quote::quote;
 
-use crate::input::Input;
-use crate::names;
+use crate::{input::Input, names};
 
 pub fn derive(input: &Input) -> TokenStream {
     let name = &input.name;
@@ -19,41 +17,53 @@ pub fn derive(input: &Input) -> TokenStream {
     let doc_url = format!("[`{0}`](struct.{0}.html)", input.name);
     let vec_doc_url = format!("[`{0}`](struct.{0}.html)", vec_name);
 
-    let fields_names = &input.fields.iter()
+    let fields_names = &input
+        .fields
+        .iter()
         .map(|field| field.ident.as_ref().unwrap())
         .collect::<Vec<_>>();
 
     let first_field = &fields_names[0];
 
-    let fields_names_hygienic_1 = input.fields.iter()
+    let fields_names_hygienic_1 = input
+        .fields
+        .iter()
         .enumerate()
         .map(|(i, _)| Ident::new(&format!("___layout_private_1_{}", i), Span::call_site()))
         .collect::<Vec<_>>();
-    let fields_names_hygienic_2 = input.fields.iter()
+    let fields_names_hygienic_2 = input
+        .fields
+        .iter()
         .enumerate()
         .map(|(i, _)| Ident::new(&format!("___layout_private_2_{}", i), Span::call_site()))
         .collect::<Vec<_>>();
 
-    let slice_fields_types = input.map_fields_nested_or(
-        |_, field_type| {
-            let slice_type = names::slice_name(field_type);
-            quote! { #slice_type<'a> }
-        },
-        |_, field_type| quote! { &'a [#field_type] },
-    ).collect::<Vec<_>>();
+    let slice_fields_types = input
+        .map_fields_nested_or(
+            |_, field_type| {
+                let slice_type = names::slice_name(field_type);
+                quote! { #slice_type<'a> }
+            },
+            |_, field_type| quote! { &'a [#field_type] },
+        )
+        .collect::<Vec<_>>();
 
-    let slice_reborrow = input.map_fields_nested_or(
-        |ident, _| quote! { self.#ident.reborrow() },
-        |ident, _| quote! { &self.#ident },
-    ).collect::<Vec<_>>();
+    let slice_reborrow = input
+        .map_fields_nested_or(
+            |ident, _| quote! { self.#ident.reborrow() },
+            |ident, _| quote! { &self.#ident },
+        )
+        .collect::<Vec<_>>();
 
-    let slice_from_raw_parts = input.map_fields_nested_or(
-        |ident, field_type| {
-            let slice_type = names::slice_name(field_type);
-            quote! { #slice_type::from_raw_parts(data.#ident, len) }
-        },
-        |ident, _| quote! { ::core::slice::from_raw_parts(data.#ident, len) },
-    ).collect::<Vec<_>>();
+    let slice_from_raw_parts = input
+        .map_fields_nested_or(
+            |ident, field_type| {
+                let slice_type = names::slice_name(field_type);
+                quote! { #slice_type::from_raw_parts(data.#ident, len) }
+            },
+            |ident, _| quote! { ::core::slice::from_raw_parts(data.#ident, len) },
+        )
+        .collect::<Vec<_>>();
 
     let mut generated = quote! {
         /// A slice of
@@ -238,7 +248,7 @@ pub fn derive(input: &Input) -> TokenStream {
     };
 
     if input.attrs.derive_clone {
-        generated.append_all(quote!{
+        generated.append_all(quote! {
             #[allow(dead_code)]
             impl<'a> #slice_name<'a> {
                 /// Similar to [`&
@@ -286,64 +296,95 @@ pub fn derive_mut(input: &Input) -> TokenStream {
     let slice_mut_doc_url = format!("[`{0}`](struct.{0}.html)", slice_mut_name);
     let vec_doc_url = format!("[`{0}`](struct.{0}.html)", vec_name);
 
-    let fields_names = &input.fields.iter()
+    let fields_names = &input
+        .fields
+        .iter()
         .map(|field| field.ident.clone().unwrap())
         .collect::<Vec<_>>();
 
     let first_field = &fields_names[0];
-    let fields_names_hygienic_1 = &input.fields.iter()
+    let fields_names_hygienic_1 = &input
+        .fields
+        .iter()
         .enumerate()
-        .map(|(i, _)| Ident::new(&format!("___layout_private_slice_1_{}", i), Span::call_site()))
+        .map(|(i, _)| {
+            Ident::new(
+                &format!("___layout_private_slice_1_{}", i),
+                Span::call_site(),
+            )
+        })
         .collect::<Vec<_>>();
-    let fields_names_hygienic_2 = &input.fields.iter()
+    let fields_names_hygienic_2 = &input
+        .fields
+        .iter()
         .enumerate()
-        .map(|(i, _)| Ident::new(&format!("___layout_private_slice_2_{}", i), Span::call_site()))
+        .map(|(i, _)| {
+            Ident::new(
+                &format!("___layout_private_slice_2_{}", i),
+                Span::call_site(),
+            )
+        })
         .collect::<Vec<_>>();
 
-    let slice_mut_fields_types = input.map_fields_nested_or(
-        |_, field_type| {
-            let slice_type = names::slice_mut_name(field_type);
-            quote! { #slice_type<'a> }
-        },
-        |_, field_type| quote! { &'a mut [#field_type] },
-    ).collect::<Vec<_>>();
+    let slice_mut_fields_types = input
+        .map_fields_nested_or(
+            |_, field_type| {
+                let slice_type = names::slice_mut_name(field_type);
+                quote! { #slice_type<'a> }
+            },
+            |_, field_type| quote! { &'a mut [#field_type] },
+        )
+        .collect::<Vec<_>>();
 
-    let slice_as_ref = input.map_fields_nested_or(
-        |ident, _| quote! { self.#ident.as_ref() },
-        |ident, _| quote! { self.#ident },
-    ).collect::<Vec<_>>();
+    let slice_as_ref = input
+        .map_fields_nested_or(
+            |ident, _| quote! { self.#ident.as_ref() },
+            |ident, _| quote! { self.#ident },
+        )
+        .collect::<Vec<_>>();
 
-    let slice_as_slice = input.map_fields_nested_or(
-        |ident, _| quote! { self.#ident.as_slice() },
-        |ident, _| quote! { &self.#ident },
-    ).collect::<Vec<_>>();
+    let slice_as_slice = input
+        .map_fields_nested_or(
+            |ident, _| quote! { self.#ident.as_slice() },
+            |ident, _| quote! { &self.#ident },
+        )
+        .collect::<Vec<_>>();
 
-    let slice_reborrow = input.map_fields_nested_or(
-        |ident, _| quote! { self.#ident.reborrow() },
-        |ident, _| quote! { &mut self.#ident },
-    ).collect::<Vec<_>>();
+    let slice_reborrow = input
+        .map_fields_nested_or(
+            |ident, _| quote! { self.#ident.reborrow() },
+            |ident, _| quote! { &mut self.#ident },
+        )
+        .collect::<Vec<_>>();
 
-    let slice_from_raw_parts_mut = input.map_fields_nested_or(
-        |ident, field_type| {
-            let slice_type = names::slice_mut_name(field_type);
-            quote! { #slice_type::from_raw_parts_mut(data.#ident, len) }
-        },
-        |ident, _| quote! {::core::slice::from_raw_parts_mut(data.#ident, len) },
-    ).collect::<Vec<_>>();
+    let slice_from_raw_parts_mut = input
+        .map_fields_nested_or(
+            |ident, field_type| {
+                let slice_type = names::slice_mut_name(field_type);
+                quote! { #slice_type::from_raw_parts_mut(data.#ident, len) }
+            },
+            |ident, _| quote! {::core::slice::from_raw_parts_mut(data.#ident, len) },
+        )
+        .collect::<Vec<_>>();
 
-    let mut nested_ord = input.map_fields_nested_or(
-        |_, field_type| {
-            let field_ref_type = names::ref_name(field_type);
-            quote! { for<'b> #field_ref_type<'b>: Ord }
-        },
-        |_, _| quote! {},
-    ).filter(|stream| !stream.is_empty()).collect::<Vec<_>>();
+    let mut nested_ord = input
+        .map_fields_nested_or(
+            |_, field_type| {
+                let field_ref_type = names::ref_name(field_type);
+                quote! { for<'b> #field_ref_type<'b>: Ord }
+            },
+            |_, _| quote! {},
+        )
+        .filter(|stream| !stream.is_empty())
+        .collect::<Vec<_>>();
     nested_ord.push(quote! { for<'b> #ref_name<'b>: Ord });
 
-    let apply_permutation = input.map_fields_nested_or(
-        |ident, _| quote! { self.#ident.__private_apply_permutation(permutation) },
-        |ident, _| quote! { permutation.apply_slice_in_place(&mut self.#ident) },
-    ).collect::<Vec<_>>();
+    let apply_permutation = input
+        .map_fields_nested_or(
+            |ident, _| quote! { self.#ident.__private_apply_permutation(permutation) },
+            |ident, _| quote! { permutation.apply_slice_in_place(&mut self.#ident) },
+        )
+        .collect::<Vec<_>>();
 
     let mut generated = quote! {
         /// A mutable slice of
@@ -677,7 +718,7 @@ pub fn derive_mut(input: &Input) -> TokenStream {
     };
 
     if input.attrs.derive_clone {
-        generated.append_all(quote!{
+        generated.append_all(quote! {
             #[allow(dead_code)]
             impl<'a> #slice_mut_name<'a> {
                 /// Similar to [`&

@@ -2,12 +2,13 @@
 
 extern crate alloc;
 
-use core::cell::Cell;
 use alloc::rc::Rc;
+use core::cell::Cell;
 
 mod particles;
-use self::particles::{Particle, ParticleVec};
 use layout::SOA;
+
+use self::particles::{Particle, ParticleVec};
 
 #[test]
 fn ty() {

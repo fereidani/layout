@@ -1,12 +1,9 @@
 use proc_macro2::{Ident, Span, TokenStream};
-use quote::TokenStreamExt;
-use quote::quote;
+use quote::{quote, TokenStreamExt};
 
-use crate::input::Input;
-use crate::names;
+use crate::{input::Input, names};
 extern crate alloc;
-use alloc::format;
-use alloc::vec::Vec;
+use alloc::{format, vec::Vec};
 
 pub fn derive(input: &Input) -> TokenStream {
     let name = &input.name;
@@ -23,52 +20,70 @@ pub fn derive(input: &Input) -> TokenStream {
 
     let doc_url = format!("[`{0}`](struct.{0}.html)", input.name);
 
-    let fields_names = &input.fields.iter()
+    let fields_names = &input
+        .fields
+        .iter()
         .map(|field| field.ident.as_ref().unwrap())
         .collect::<Vec<_>>();
 
-    let fields_names_hygienic = input.fields.iter()
+    println!("Fields: {:?}", fields_names);
+
+    let fields_names_hygienic = input
+        .fields
+        .iter()
         .enumerate()
         .map(|(i, _)| Ident::new(&format!("___layout_private_{}", i), Span::call_site()))
         .collect::<Vec<_>>();
 
     let first_field = &fields_names[0];
 
-    let vec_fields_types = input.map_fields_nested_or(
-        |_, field_type| {
-            let vec_type = names::vec_name(field_type);
-            quote! { #vec_type }
-        },
-        |_, field_type| quote! { Vec<#field_type> },
-    ).collect::<Vec<_>>();
+    let vec_fields_types = input
+        .map_fields_nested_or(
+            |_, field_type| {
+                let vec_type = names::vec_name(field_type);
+                quote! { #vec_type }
+            },
+            |_, field_type| quote! { Vec<#field_type> },
+        )
+        .collect::<Vec<_>>();
 
-    let vec_with_capacity = input.map_fields_nested_or(
-        |_, field_type| quote! { <#field_type as SOA>::Type::with_capacity(capacity) },
-        |_, _| quote! { Vec::with_capacity(capacity) },
-    ).collect::<Vec<_>>();
+    let vec_with_capacity = input
+        .map_fields_nested_or(
+            |_, field_type| quote! { <#field_type as SOA>::Type::with_capacity(capacity) },
+            |_, _| quote! { Vec::with_capacity(capacity) },
+        )
+        .collect::<Vec<_>>();
 
-    let vec_slice = input.map_fields_nested_or(
-        |ident, _| quote! { self.#ident.slice(range.clone()) },
-        |ident, _| quote! { &self.#ident[range.clone()] },
-    ).collect::<Vec<_>>();
+    let vec_slice = input
+        .map_fields_nested_or(
+            |ident, _| quote! { self.#ident.slice(range.clone()) },
+            |ident, _| quote! { &self.#ident[range.clone()] },
+        )
+        .collect::<Vec<_>>();
 
-    let vec_slice_mut = input.map_fields_nested_or(
-        |ident, _| quote! { self.#ident.slice_mut(range.clone()) },
-        |ident, _| quote! { &mut self.#ident[range.clone()] },
-    ).collect::<Vec<_>>();
+    let vec_slice_mut = input
+        .map_fields_nested_or(
+            |ident, _| quote! { self.#ident.slice_mut(range.clone()) },
+            |ident, _| quote! { &mut self.#ident[range.clone()] },
+        )
+        .collect::<Vec<_>>();
 
-    let vec_from_raw_parts = input.map_fields_nested_or(
-        |ident, field_type| {
-            let vec_type = names::vec_name(field_type);
-            quote! { #vec_type::from_raw_parts(data.#ident, len, capacity) }
-        },
-        |ident, _| quote! { Vec::from_raw_parts(data.#ident, len, capacity) },
-    ).collect::<Vec<_>>();
+    let vec_from_raw_parts = input
+        .map_fields_nested_or(
+            |ident, field_type| {
+                let vec_type = names::vec_name(field_type);
+                quote! { #vec_type::from_raw_parts(data.#ident, len, capacity) }
+            },
+            |ident, _| quote! { Vec::from_raw_parts(data.#ident, len, capacity) },
+        )
+        .collect::<Vec<_>>();
 
-    let vec_replace = input.map_fields_nested_or(
-        |ident, _| quote! { self.#ident.replace(index, field) },
-        |ident, _| quote! { ::core::mem::replace(&mut self.#ident[index], field) },
-    ).collect::<Vec<_>>();
+    let vec_replace = input
+        .map_fields_nested_or(
+            |ident, _| quote! { self.#ident.replace(index, field) },
+            |ident, _| quote! { ::core::mem::replace(&mut self.#ident[index], field) },
+        )
+        .collect::<Vec<_>>();
 
     let mut generated = quote! {
         /// An analog to `
@@ -461,7 +476,7 @@ pub fn derive(input: &Input) -> TokenStream {
     };
 
     if input.attrs.derive_clone {
-        generated.append_all(quote!{
+        generated.append_all(quote! {
             #[allow(dead_code)]
             impl #vec_name {
                 /// Similar to [`

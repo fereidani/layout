@@ -1,9 +1,7 @@
 use proc_macro2::TokenStream;
-
 use quote::quote;
 
-use crate::input::Input;
-use crate::names;
+use crate::{input::Input, names};
 
 pub fn derive(input: &Input) -> TokenStream {
     let vec_name = names::vec_name(&input.name);
@@ -12,33 +10,40 @@ pub fn derive(input: &Input) -> TokenStream {
     let ref_name = names::ref_name(&input.name);
     let ref_mut_name = names::ref_mut_name(&input.name);
 
-    let fields_names = &input.fields.iter()
+    let fields_names = &input
+        .fields
+        .iter()
         .map(|field| field.ident.clone().unwrap())
         .collect::<Vec<_>>();
     let first_field_name = &fields_names[0];
 
-
-    let get_unchecked = input.map_fields_nested_or(
-        |ident, _| quote! { ::layout::SoAIndex::get_unchecked(self.clone(), slice.#ident) },
-        |ident, _| quote! { slice.#ident.get_unchecked(self.clone()) },
-    ).collect::<Vec<_>>();
+    let get_unchecked = input
+        .map_fields_nested_or(
+            |ident, _| quote! { ::layout::SoAIndex::get_unchecked(self.clone(), slice.#ident) },
+            |ident, _| quote! { slice.#ident.get_unchecked(self.clone()) },
+        )
+        .collect::<Vec<_>>();
 
     let get_unchecked_mut = input.map_fields_nested_or(
         |ident, _| quote! { ::layout::SoAIndexMut::get_unchecked_mut(self.clone(), slice.#ident) },
         |ident, _| quote! { slice.#ident.get_unchecked_mut(self.clone()) },
     ).collect::<Vec<_>>();
 
-    let index = input.map_fields_nested_or(
-        |ident, _| quote! { ::layout::SoAIndex::index(self.clone(), slice.#ident) },
-        |ident, _| quote! { & slice.#ident[self.clone()] },
-    ).collect::<Vec<_>>();
+    let index = input
+        .map_fields_nested_or(
+            |ident, _| quote! { ::layout::SoAIndex::index(self.clone(), slice.#ident) },
+            |ident, _| quote! { & slice.#ident[self.clone()] },
+        )
+        .collect::<Vec<_>>();
 
-    let index_mut = input.map_fields_nested_or(
-        |ident, _| quote! { ::layout::SoAIndexMut::index_mut(self.clone(), slice.#ident) },
-        |ident, _| quote! { &mut slice.#ident[self.clone()] },
-    ).collect::<Vec<_>>();
+    let index_mut = input
+        .map_fields_nested_or(
+            |ident, _| quote! { ::layout::SoAIndexMut::index_mut(self.clone(), slice.#ident) },
+            |ident, _| quote! { &mut slice.#ident[self.clone()] },
+        )
+        .collect::<Vec<_>>();
 
-    quote!{
+    quote! {
         // usize
         impl<'a> ::layout::SoAIndex<&'a #vec_name> for usize {
             type RefOutput = #ref_name<'a>;

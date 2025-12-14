@@ -2,7 +2,7 @@
 
 use layout::soa_zip;
 mod particles;
-use self::particles::{Particle, ParticleVec, ParticleSlice, ParticleSliceMut};
+use self::particles::{Particle, ParticleSlice, ParticleSliceMut, ParticleVec};
 
 #[test]
 fn vec() {
@@ -119,14 +119,12 @@ fn external() {
 }
 
 struct Wrapper {
-    particles: ParticleVec
+    particles: ParticleVec,
 }
 
 impl Wrapper {
     fn new(particles: ParticleVec) -> Wrapper {
-        Wrapper {
-            particles,
-        }
+        Wrapper { particles }
     }
 
     fn particles(&self) -> ParticleSlice<'_> {

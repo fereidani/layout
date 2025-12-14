@@ -4,7 +4,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 mod particles;
 
-use self::particles::{Particle, ParticleVec, ParticleSlice, ParticleSliceMut};
+use self::particles::{Particle, ParticleSlice, ParticleSliceMut, ParticleVec};
 
 #[test]
 fn const_ref() {
@@ -117,9 +117,7 @@ fn vec() {
         *ptr.as_mut().unwrap().mass = 42.0;
     }
 
-    let particles = unsafe {
-        ParticleVec::from_raw_parts(ptr, len, capacity)
-    };
+    let particles = unsafe { ParticleVec::from_raw_parts(ptr, len, capacity) };
 
     assert_eq!(particles.len(), len);
     assert_eq!(particles.capacity(), capacity);

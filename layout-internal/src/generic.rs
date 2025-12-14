@@ -1,9 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use crate::input::Input;
-use crate::names;
-
+use crate::{input::Input, names};
 
 pub fn derive_slice(input: &Input) -> TokenStream {
     let name = &input.name;
@@ -63,7 +61,7 @@ pub fn derive_slice(input: &Input) -> TokenStream {
         }
     };
 
-    return generated
+    return generated;
 }
 
 pub fn derive_slice_mut(input: &Input) -> TokenStream {
@@ -172,7 +170,7 @@ pub fn derive_slice_mut(input: &Input) -> TokenStream {
         }
     };
 
-    return generated
+    return generated;
 }
 
 pub fn derive_vec(input: &Input) -> TokenStream {
@@ -347,5 +345,5 @@ pub fn derive_vec(input: &Input) -> TokenStream {
         }
     };
 
-    return generated
+    return generated;
 }

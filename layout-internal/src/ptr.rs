@@ -1,8 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use crate::input::Input;
-use crate::names;
+use crate::{input::Input, names};
 
 pub fn derive(input: &Input) -> TokenStream {
     let name = &input.name;
@@ -22,35 +21,45 @@ pub fn derive(input: &Input) -> TokenStream {
     let ref_doc_url = format!("[`{0}`](struct.{0}.html)", ref_name);
     let ref_mut_doc_url = format!("[`{0}`](struct.{0}.html)", ref_mut_name);
 
-    let fields_names = &input.fields.iter()
+    let fields_names = &input
+        .fields
+        .iter()
         .map(|field| field.ident.clone().unwrap())
         .collect::<Vec<_>>();
 
-    let ptr_fields_types = input.map_fields_nested_or(
-        |_, field_type| {
-            let field_ptr_type = names::ptr_name(field_type);
-            quote! { #field_ptr_type }
-        },
-        |_, field_type| quote! { *const #field_type },
-    ).collect::<Vec<_>>();
+    let ptr_fields_types = input
+        .map_fields_nested_or(
+            |_, field_type| {
+                let field_ptr_type = names::ptr_name(field_type);
+                quote! { #field_ptr_type }
+            },
+            |_, field_type| quote! { *const #field_type },
+        )
+        .collect::<Vec<_>>();
 
-    let ptr_mut_fields_types = input.map_fields_nested_or(
-        |_, field_type| {
-            let field_ptr_type = names::ptr_mut_name(field_type);
-            quote! { #field_ptr_type }
-        },
-        |_, field_type| quote! { *mut #field_type },
-    ).collect::<Vec<_>>();
+    let ptr_mut_fields_types = input
+        .map_fields_nested_or(
+            |_, field_type| {
+                let field_ptr_type = names::ptr_mut_name(field_type);
+                quote! { #field_ptr_type }
+            },
+            |_, field_type| quote! { *mut #field_type },
+        )
+        .collect::<Vec<_>>();
 
-    let as_ptr = input.map_fields_nested_or(
-        |ident, _| quote! { self.#ident.as_ptr() },
-        |ident, _| quote! { self.#ident as *const _ },
-    ).collect::<Vec<_>>();
+    let as_ptr = input
+        .map_fields_nested_or(
+            |ident, _| quote! { self.#ident.as_ptr() },
+            |ident, _| quote! { self.#ident as *const _ },
+        )
+        .collect::<Vec<_>>();
 
-    let as_mut_ptr = input.map_fields_nested_or(
-        |ident, _| quote! { self.#ident.as_mut_ptr() },
-        |ident, _| quote! { self.#ident as *mut _ },
-    ).collect::<Vec<_>>();
+    let as_mut_ptr = input
+        .map_fields_nested_or(
+            |ident, _| quote! { self.#ident.as_mut_ptr() },
+            |ident, _| quote! { self.#ident as *mut _ },
+        )
+        .collect::<Vec<_>>();
 
     quote! {
         /// An analog of a pointer to
