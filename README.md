@@ -181,11 +181,6 @@ pub struct ParticleVec {
 
 All helper structs will be also nested, for example `PointSlice` will be nested in `ParticleSlice`.
 
-## Documentation
-
-Please see http://lumol.org/layout/layout_example/ for a small
-example and the documentation of all the generated code.
-
 ## Benchmarks
 
 The benchmarks compare two different data layouts:
