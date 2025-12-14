@@ -168,6 +168,17 @@ fn soa_big_do_work_100k(bencher: &mut Bencher) {
     })
 }
 
+fn soa_big_do_work_simple_100k(bencher: &mut Bencher) {
+    let vec = Big::soa_vec(100_000);
+    bencher.iter(||{
+        let mut s = 0.0;
+        for elem in vec.iter() {
+            s += elem.position.0 + elem.velocity.0;
+        }
+        s
+    })
+}
+
 
 benchmark_group!(aos,
     aos_small_push, aos_big_push, aos_small_do_work_100k, aos_big_do_work_10k,
@@ -175,6 +186,6 @@ benchmark_group!(aos,
 );
 benchmark_group!(soa,
     soa_small_push, soa_big_push, soa_small_do_work_100k, soa_big_do_work_10k,
-    soa_big_do_work_100k
+    soa_big_do_work_100k, soa_big_do_work_simple_100k,
 );
 benchmark_main!(soa, aos);
