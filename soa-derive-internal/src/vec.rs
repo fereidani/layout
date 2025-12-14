@@ -196,7 +196,7 @@ pub fn derive(input: &Input) -> TokenStream {
             /// ::insert()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.insert).
             #[allow(clippy::forget_non_drop)]
             pub fn insert(&mut self, index: usize, element: #name) {
-                if index > self.len() {
+                if index >= self.len() {
                     panic!("index out of bounds: the len is {} but the index is {}", self.len(), index);
                 }
 
@@ -213,7 +213,7 @@ pub fn derive(input: &Input) -> TokenStream {
             /// Similar to [`std::mem::replace()`](https://doc.rust-lang.org/std/mem/fn.replace.html).
             #[allow(clippy::forget_non_drop)]
             pub fn replace(&mut self, index: usize, element: #name) -> #name {
-                if index > self.len() {
+                if index >= self.len() {
                     panic!("index out of bounds: the len is {} but the index is {}", self.len(), index);
                 }
 
