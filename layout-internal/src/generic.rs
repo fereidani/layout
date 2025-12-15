@@ -88,18 +88,22 @@ pub fn derive_slice_mut(input: &Input) -> TokenStream {
             type IterMut<'t> = #iter_mut_name<'t> where Self: 't;
             type PtrMut = #ptr_mut_name;
 
+            #[inline]
             fn len(&self) -> usize {
                 self.len()
             }
 
+            #[inline]
             fn is_empty(&self) -> bool {
                 self.is_empty()
             }
 
+            #[inline]
             fn as_slice<'c>(&'c self) -> Self::Slice<'c> {
                 self.as_slice()
             }
 
+            #[inline]
             fn slice<'c, 'b: 'c>(&'c self, index: impl core::ops::RangeBounds<usize>) -> Self::Slice<'c> where Self: 'b {
                 let start = match index.start_bound() {
                     core::ops::Bound::Included(i) | core::ops::Bound::Excluded(i) => *i,
@@ -114,22 +118,27 @@ pub fn derive_slice_mut(input: &Input) -> TokenStream {
                 self.index(start..end)
             }
 
+            #[inline]
             fn get<'c>(&'c self, index: usize) -> Option<Self::Ref<'c>> {
                 self.get(index)
             }
 
+            #[inline]
             fn index<'c>(&'c self, index: usize) -> Self::Ref<'c> {
                 self.index(index)
             }
 
+            #[inline]
             fn iter<'c>(&'c self) -> Self::Iter<'c> {
                 self.as_ref().into_iter()
             }
 
+            #[inline]
             fn as_mut_slice<'c: 'b, 'b>(&'c mut self) -> Self::SliceMut<'c> where Self: 'b {
                 self.reborrow()
             }
 
+            #[inline]
             fn slice_mut<'c>(&'c mut self, index: impl core::ops::RangeBounds<usize>) -> Self::SliceMut<'c> {
                 let start = match index.start_bound() {
                     core::ops::Bound::Included(i) | core::ops::Bound::Excluded(i) => *i,
@@ -144,26 +153,32 @@ pub fn derive_slice_mut(input: &Input) -> TokenStream {
                 self.index_mut(start..end)
             }
 
+            #[inline]
             fn get_mut<'c>(&'c mut self, index: usize) -> Option<Self::RefMut<'c>> {
                 self.get_mut(index)
             }
 
+            #[inline]
             fn index_mut<'c>(&'c mut self, index: usize) -> Self::RefMut<'c> {
                 self.index_mut(index)
             }
 
+            #[inline]
             fn iter_mut<'c>(&'c mut self) -> Self::IterMut<'c> {
                 self.iter_mut()
             }
 
+            #[inline]
             fn apply_index(&mut self, indices: &[usize]) {
                 self.__private_apply_permutation(&mut ::layout::Permutation::oneline(indices).inverse());
             }
 
+            #[inline]
             fn as_ptr(&self) -> Self::Ptr {
                 self.as_ptr()
             }
 
+            #[inline]
             fn as_mut_ptr(&mut self) -> Self::PtrMut {
                 self.as_mut_ptr()
             }
@@ -198,18 +213,22 @@ pub fn derive_vec(input: &Input) -> TokenStream {
             type IterMut<'t> = #iter_mut_name<'t>;
             type PtrMut = #ptr_mut_name;
 
+            #[inline]
             fn len(&self) -> usize {
                 self.len()
             }
 
+            #[inline]
             fn is_empty(&self) -> bool {
                 self.is_empty()
             }
 
+            #[inline]
             fn as_slice<'c, 'a: 'c>(&'c self) -> Self::Slice<'c> where Self: 'a {
                 self.as_slice()
             }
 
+            #[inline]
             fn slice<'c, 'a: 'c>(&'c self, index: impl core::ops::RangeBounds<usize>) -> Self::Slice<'c> where Self: 'a {
                 let start = match index.start_bound() {
                     core::ops::Bound::Included(i) | core::ops::Bound::Excluded(i) => *i,
@@ -224,22 +243,27 @@ pub fn derive_vec(input: &Input) -> TokenStream {
                 self.index(start..end)
             }
 
+            #[inline]
             fn get<'c>(&'c self, index: usize) -> Option<Self::Ref<'c>> {
                 self.get(index)
             }
 
+            #[inline]
             fn index<'c>(&'c self, index: usize) -> Self::Ref<'c> {
                 self.index(index)
             }
 
+            #[inline]
             fn iter<'c>(&'c self) -> Self::Iter<'c> {
                 self.iter()
             }
 
+            #[inline]
             fn as_mut_slice<'c, 'a: 'c>(&'c mut self) -> Self::SliceMut<'c> where Self: 'a {
                 self.as_mut_slice()
             }
 
+            #[inline]
             fn slice_mut<'c>(&'c mut self, index: impl core::ops::RangeBounds<usize>) -> Self::SliceMut<'c> {
                 let start = match index.start_bound() {
                     core::ops::Bound::Included(i) | core::ops::Bound::Excluded(i) => *i,
@@ -254,91 +278,113 @@ pub fn derive_vec(input: &Input) -> TokenStream {
                 self.index_mut(start..end)
             }
 
+            #[inline]
             fn get_mut<'c>(&'c mut self, index: usize) -> Option<Self::RefMut<'c>> {
                 self.get_mut(index)
             }
 
+            #[inline]
             fn index_mut<'c>(&'c mut self, index: usize) -> Self::RefMut<'c> {
                 self.index_mut(index)
             }
 
+            #[inline]
             fn iter_mut<'c>(&'c mut self) -> Self::IterMut<'c> {
                 self.iter_mut()
             }
 
+            #[inline]
             fn apply_index(&mut self, indices: &[usize]) {
                 use ::layout::SoASliceMut;
                 self.as_mut_slice().apply_index(indices);
             }
 
+            #[inline]
             fn new() -> Self {
                 #vec_name::new()
             }
 
+            #[inline]
             fn with_capacity(capacity: usize) -> Self {
                 #vec_name::with_capacity(capacity)
             }
 
+            #[inline]
             fn capacity(&self) -> usize {
                 self.capacity()
             }
 
+            #[inline]
             fn reserve(&mut self, additional: usize) {
                 self.reserve(additional);
             }
 
+            #[inline]
             fn reserve_exact(&mut self, additional: usize) {
                 self.reserve_exact(additional);
             }
 
+            #[inline]
             fn shrink_to_fit(&mut self) {
                 self.shrink_to_fit();
             }
 
+            #[inline]
             fn truncate(&mut self, len: usize) {
                 self.truncate(len);
             }
 
+            #[inline]
             fn push(&mut self, value: #name) {
                 self.push(value);
             }
 
+            #[inline]
             fn swap_remove(&mut self, index: usize) -> #name {
                 self.swap_remove(index)
             }
 
+            #[inline]
             fn insert(&mut self, index: usize, element: #name) {
                 self.insert(index, element);
             }
 
+            #[inline]
             fn replace(&mut self, index: usize, element: #name) -> #name {
                 self.replace(index, element)
             }
 
+            #[inline]
             fn remove(&mut self, index: usize) -> #name {
                 self.remove(index)
             }
 
+            #[inline]
             fn pop(&mut self) -> Option<#name> {
                 self.pop()
             }
 
+            #[inline]
             fn append(&mut self, other: &mut Self) {
                 self.append(other);
             }
 
+            #[inline]
             fn clear(&mut self) {
                 self.clear();
             }
 
+            #[inline]
             fn split_off(&mut self, at: usize) -> Self {
                 self.split_off(at)
             }
 
+            #[inline]
             fn as_ptr(&self) -> Self::Ptr {
                 self.as_ptr()
             }
 
+            #[inline]
             fn as_mut_ptr(&mut self) -> Self::PtrMut {
                 self.as_mut_ptr()
             }

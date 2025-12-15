@@ -91,6 +91,7 @@ pub fn derive(input: &Input) -> TokenStream {
             #[doc = #slice_name_str]
             /// ::len()`](https://doc.rust-lang.org/std/primitive.slice.html#method.len),
             /// the length of all fields should be the same.
+            #[inline]
             pub fn len(&self) -> usize {
                 let len = self.#first_field.len();
                 #(debug_assert_eq!(self.#fields_names.len(), len);)*
@@ -101,6 +102,7 @@ pub fn derive(input: &Input) -> TokenStream {
             #[doc = #slice_name_str]
             /// ::is_empty()`](https://doc.rust-lang.org/std/primitive.slice.html#method.is_empty),
             /// the length of all fields should be the same.
+            #[inline]
             pub fn is_empty(&self) -> bool {
                 let empty = self.#first_field.is_empty();
                 #(debug_assert_eq!(self.#fields_names.is_empty(), empty);)*
@@ -111,7 +113,7 @@ pub fn derive(input: &Input) -> TokenStream {
             #[doc = #slice_name_str]
             /// ::first()`](https://doc.rust-lang.org/std/primitive.slice.html#method.first).
             pub fn first(&self) -> Option<#ref_name<'a>> {
-                if self.is_empty() {
+                if ::branches::unlikely(self.is_empty()) {
                     None
                 } else {
                     #(
@@ -125,7 +127,7 @@ pub fn derive(input: &Input) -> TokenStream {
             #[doc = #slice_name_str]
             /// ::split_first()`](https://doc.rust-lang.org/std/primitive.slice.html#method.split_first).
             pub fn split_first(&self) -> Option<(#ref_name<'a>, #slice_name<'a>)> {
-                if self.is_empty() {
+                if ::branches::unlikely(self.is_empty()) {
                     None
                 } else {
                     #(
@@ -141,7 +143,7 @@ pub fn derive(input: &Input) -> TokenStream {
             #[doc = #slice_name_str]
             /// ::last()`](https://doc.rust-lang.org/std/primitive.slice.html#method.last).
             pub fn last(&self) -> Option<#ref_name<'a>> {
-                if self.is_empty() {
+                if ::branches::unlikely(self.is_empty()) {
                     None
                 } else {
                     #(
@@ -155,7 +157,7 @@ pub fn derive(input: &Input) -> TokenStream {
             #[doc = #slice_name_str]
             /// ::split_last()`](https://doc.rust-lang.org/std/primitive.slice.html#method.split_last).
             pub fn split_last(&self) -> Option<(#ref_name<'a>, #slice_name<'a>)> {
-                if self.is_empty() {
+                if ::branches::unlikely(self.is_empty()) {
                     None
                 } else {
                     #(
@@ -423,6 +425,7 @@ pub fn derive_mut(input: &Input) -> TokenStream {
             #[doc = #slice_name_str]
             /// ::len()`](https://doc.rust-lang.org/std/primitive.slice.html#method.len),
             /// the length of all fields should be the same.
+            #[inline]
             pub fn len(&self) -> usize {
                 let len = self.#first_field.len();
                 #(debug_assert_eq!(self.#fields_names.len(), len);)*
@@ -433,6 +436,7 @@ pub fn derive_mut(input: &Input) -> TokenStream {
             #[doc = #slice_name_str]
             /// ::is_empty()`](https://doc.rust-lang.org/std/primitive.slice.html#method.is_empty),
             /// the length of all fields should be the same.
+            #[inline]
             pub fn is_empty(&self) -> bool {
                 let empty = self.#first_field.is_empty();
                 #(debug_assert_eq!(self.#fields_names.is_empty(), empty);)*
@@ -443,7 +447,7 @@ pub fn derive_mut(input: &Input) -> TokenStream {
             #[doc = #slice_name_str]
             /// ::first_mut()`](https://doc.rust-lang.org/std/primitive.slice.html#method.first_mut).
             pub fn first_mut(&mut self) -> Option<#ref_mut_name> {
-                if self.is_empty() {
+                if ::branches::unlikely(self.is_empty()) {
                     None
                 } else {
                     #(
@@ -461,7 +465,7 @@ pub fn derive_mut(input: &Input) -> TokenStream {
             /// You should use [`Self::reborrow()`] first if you want the
             /// returned values to have a shorter lifetime.
             pub fn split_first_mut(mut self) -> Option<(#ref_mut_name<'a>, #slice_mut_name<'a>)> {
-                if self.is_empty() {
+                if ::branches::unlikely(self.is_empty()) {
                     None
                 } else {
                     #(
@@ -477,7 +481,7 @@ pub fn derive_mut(input: &Input) -> TokenStream {
             #[doc = #slice_name_str]
             /// ::last_mut()`](https://doc.rust-lang.org/std/primitive.slice.html#method.last_mut).
             pub fn last_mut(&mut self) -> Option<#ref_mut_name> {
-                if self.is_empty() {
+                if ::branches::unlikely(self.is_empty()) {
                     None
                 } else {
                     #(
@@ -495,7 +499,7 @@ pub fn derive_mut(input: &Input) -> TokenStream {
             /// You should use [`Self::reborrow()`] first if you want the
             /// returned values to have a shorter lifetime.
             pub fn split_last_mut(mut self) -> Option<(#ref_mut_name<'a>, #slice_mut_name<'a>)> {
-                if self.is_empty() {
+                if ::branches::unlikely(self.is_empty()) {
                     None
                 } else {
                     #(

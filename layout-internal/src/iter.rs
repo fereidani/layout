@@ -113,11 +113,10 @@ pub fn derive(input: &Input) -> TokenStream {
 
             #[inline]
             fn next(&mut self) -> Option<#ref_name<'a>> {
-                self.0.next().and_then(|#iter_pat|
-                    Some(#ref_name{
-                        #(#fields_names,)*
-                    })
-                )
+                match self.0.next() {
+                    Some(#iter_pat) => Some(#ref_name { #(#fields_names,)* }),
+                    None => None,
+                }
             }
 
             #[inline]
@@ -138,6 +137,7 @@ pub fn derive(input: &Input) -> TokenStream {
         }
 
         impl<'a> ExactSizeIterator for #iter_name<'a> {
+            #[inline]
             fn len(&self) -> usize {
                 self.0.len()
             }
@@ -147,6 +147,7 @@ pub fn derive(input: &Input) -> TokenStream {
             /// Get an iterator over the
             #[doc = #ref_doc_url]
             /// in this vector
+            #[inline]
             pub fn iter(&self) -> #iter_name {
                 self.as_slice().into_iter()
             }
@@ -156,6 +157,7 @@ pub fn derive(input: &Input) -> TokenStream {
             /// Get an iterator over the
             #[doc = #ref_doc_url]
             /// in this slice.
+            #[inline]
             pub fn iter(&self) -> #iter_name {
                 #iter_name(#create_iter)
             }
@@ -163,6 +165,7 @@ pub fn derive(input: &Input) -> TokenStream {
             /// Get an iterator over the
             #[doc = #ref_doc_url]
             /// in this slice.
+            #[inline]
             pub fn into_iter(self) -> #iter_name<'a> {
                 #iter_name(#create_into_iter)
             }
@@ -178,11 +181,10 @@ pub fn derive(input: &Input) -> TokenStream {
 
             #[inline]
             fn next(&mut self) -> Option<#ref_mut_name<'a>> {
-                self.0.next().and_then(|#iter_pat|
-                    Some(#ref_mut_name{
-                        #(#fields_names,)*
-                    })
-                )
+                match self.0.next() {
+                    Some(#iter_pat) => Some(#ref_mut_name { #(#fields_names,)* }),
+                    None => None,
+                }
             }
 
             #[inline]
@@ -202,6 +204,7 @@ pub fn derive(input: &Input) -> TokenStream {
             }
         }
         impl<'a> ExactSizeIterator for #iter_mut_name<'a> {
+            #[inline]
             fn len(&self) -> usize {
                 self.0.len()
             }
@@ -211,6 +214,7 @@ pub fn derive(input: &Input) -> TokenStream {
             /// Get a mutable iterator over the
             #[doc = #ref_mut_doc_url]
             /// in this vector
+            #[inline]
             pub fn iter_mut(&mut self) -> #iter_mut_name {
                 self.as_mut_slice().into_iter()
             }
@@ -220,6 +224,7 @@ pub fn derive(input: &Input) -> TokenStream {
             /// Get an iterator over the
             #[doc = #ref_doc_url]
             /// in this vector
+            #[inline]
             pub fn iter(&mut self) -> #iter_name {
                 self.as_ref().into_iter()
             }
@@ -227,6 +232,7 @@ pub fn derive(input: &Input) -> TokenStream {
             /// Get a mutable iterator over the
             #[doc = #ref_mut_doc_url]
             /// in this vector
+            #[inline]
             pub fn iter_mut(&mut self) -> #iter_mut_name {
                 #iter_mut_name(#create_iter_mut)
             }
@@ -234,6 +240,7 @@ pub fn derive(input: &Input) -> TokenStream {
             /// Get a mutable iterator over the
             #[doc = #ref_mut_doc_url]
             /// in this vector
+            #[inline]
             pub fn into_iter(self) -> #iter_mut_name<'a> {
                 #iter_mut_name(#create_mut_into_iter)
             }
@@ -249,7 +256,7 @@ pub fn derive(input: &Input) -> TokenStream {
         impl<'a> IntoIterator for #slice_name<'a> {
             type Item = #ref_name<'a>;
             type IntoIter = #iter_name<'a>;
-
+            #[inline]
             fn into_iter(self) -> Self::IntoIter {
                 #iter_name(#create_into_iter)
             }
@@ -270,7 +277,7 @@ pub fn derive(input: &Input) -> TokenStream {
         impl<'a, 'b> IntoIterator for &'a #slice_name<'b> {
             type Item = #ref_name<'a>;
             type IntoIter = #iter_name<'a>;
-
+            #[inline]
             fn into_iter(self) -> Self::IntoIter {
                 #iter_name(#create_into_iter)
             }
@@ -279,7 +286,7 @@ pub fn derive(input: &Input) -> TokenStream {
         impl<'a> IntoIterator for &'a #vec_name {
             type Item = #ref_name<'a>;
             type IntoIter = #iter_name<'a>;
-
+            #[inline]
             fn into_iter(self) -> Self::IntoIter {
                 self.as_slice().into_iter()
             }
@@ -288,7 +295,7 @@ pub fn derive(input: &Input) -> TokenStream {
         impl<'a> IntoIterator for #slice_mut_name<'a> {
             type Item = #ref_mut_name<'a>;
             type IntoIter = #iter_mut_name<'a>;
-
+            #[inline]
             fn into_iter(self) -> Self::IntoIter {
                 #iter_mut_name(#create_mut_into_iter)
             }
@@ -297,7 +304,7 @@ pub fn derive(input: &Input) -> TokenStream {
         impl<'a> IntoIterator for &'a mut #vec_name {
             type Item = #ref_mut_name<'a>;
             type IntoIter = #iter_mut_name<'a>;
-
+            #[inline]
             fn into_iter(self) -> Self::IntoIter {
                 self.as_mut_slice().into_iter()
             }

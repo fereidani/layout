@@ -20,7 +20,9 @@ std = []
 members = ["layout-internal"]
 
 [dependencies]
-layout_internal = { path = "layout-internal", version = "0.0.1" }
+bit-vec = { version = "0.8.0", default-features = false }
+branches = { version = "0.3.0", default-features = false }
+layout_internal = { path = "./layout-internal", version = "0.0.1" }
 permutation = "0.4.1"
 
 [dev-dependencies]
@@ -35,7 +37,6 @@ rustc_version = "0.4"
 [[bench]]
 name = "soa"
 harness = false
-
 
 [profile.bench]
 opt-level = 3

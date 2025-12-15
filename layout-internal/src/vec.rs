@@ -26,7 +26,6 @@ pub fn derive(input: &Input) -> TokenStream {
         .map(|field| field.ident.as_ref().unwrap())
         .collect::<Vec<_>>();
 
-    println!("Fields: {:?}", fields_names);
 
     let fields_names_hygienic = input
         .fields
@@ -183,6 +182,7 @@ pub fn derive(input: &Input) -> TokenStream {
             #[doc = #vec_name_str]
             /// ::len()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.len),
             /// all the fields should have the same length.
+            #[inline]
             pub fn len(&self) -> usize {
                 let len = self.#first_field.len();
                 #(debug_assert_eq!(self.#fields_names.len(), len);)*
@@ -193,6 +193,7 @@ pub fn derive(input: &Input) -> TokenStream {
             #[doc = #vec_name_str]
             /// ::is_empty()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.is_empty),
             /// all the fields should have the same length.
+            #[inline]
             pub fn is_empty(&self) -> bool {
                 let empty = self.#first_field.is_empty();
                 #(debug_assert_eq!(self.#fields_names.is_empty(), empty);)*
@@ -214,7 +215,7 @@ pub fn derive(input: &Input) -> TokenStream {
             /// ::insert()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.insert).
             #[allow(clippy::forget_non_drop)]
             pub fn insert(&mut self, index: usize, element: #name) {
-                if index >= self.len() {
+                if ::branches::unlikely(index >= self.len()) {
                     panic!("index out of bounds: the len is {} but the index is {}", self.len(), index);
                 }
 
@@ -231,7 +232,7 @@ pub fn derive(input: &Input) -> TokenStream {
             /// Similar to [`core::mem::replace()`](https://doc.rust-lang.org/std/mem/fn.replace.html).
             #[allow(clippy::forget_non_drop)]
             pub fn replace(&mut self, index: usize, element: #name) -> #name {
-                if index >= self.len() {
+                if ::branches::unlikely(index >= self.len()) {
                     panic!("index out of bounds: the len is {} but the index is {}", self.len(), index);
                 }
 
@@ -262,7 +263,7 @@ pub fn derive(input: &Input) -> TokenStream {
             #[doc = #vec_name_str]
             /// ::pop()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.pop).
             pub fn pop(&mut self) -> Option<#name> {
-                if self.is_empty() {
+                if ::branches::unlikely(self.is_empty()) {
                     None
                 } else {
                     #(
