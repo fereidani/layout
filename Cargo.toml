@@ -15,6 +15,7 @@ keywords = ["soa", "dod", "data-oriented", "struct-of-array", "performance"]
 [features]
 default = ["std"]
 std = []
+tuple = ["layout_internal/tuple"]
 
 [workspace]
 members = ["layout-internal"]

@@ -70,6 +70,28 @@ fn from_iter() {
     assert_eq!(particles, particles_from_iter)
 }
 
+#[cfg(feature = "tuple")]
+#[test]
+fn from_tuple_iter() {
+    let vec_with_particles = vec![
+        Particle::new(String::from("Na"), 0.0),
+        Particle::new(String::from("Cl"), 1.0),
+        Particle::new(String::from("Zn"), 2.0),
+    ];
+
+    let particles_from_iter: ParticleVec = vec_with_particles
+        .iter()
+        .map(|particle| (particle.name.clone(), particle.mass))
+        .collect();
+
+    let mut particles = ParticleVec::new();
+    particles.push(Particle::new(String::from("Na"), 0.0));
+    particles.push(Particle::new(String::from("Cl"), 1.0));
+    particles.push(Particle::new(String::from("Zn"), 2.0));
+
+    assert_eq!(particles, particles_from_iter)
+}
+
 #[test]
 fn extend() {
     let vec_with_particles = vec![

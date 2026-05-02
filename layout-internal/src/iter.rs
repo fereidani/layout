@@ -33,6 +33,23 @@ pub fn derive(input: &Input) -> TokenStream {
         .map(|field| field.ty.clone())
         .collect::<Vec<_>>();
 
+    let tuple_from_iter_impl = if cfg!(feature = "tuple") {
+        quote! {
+            impl core::iter::FromIterator<(#(#fields_types,)*)> for #vec_name {
+                fn from_iter<T: IntoIterator<Item = (#(#fields_types,)*)>>(iter: T) -> Self {
+                    let iterator = iter.into_iter();
+                    let size_hint = iterator.size_hint();
+                    let capacity = size_hint.1.unwrap_or(size_hint.0);
+                    let mut result = #vec_name::with_capacity(capacity);
+                    iterator.for_each(|(#(#fields_names,)*)| result.push(#name { #(#fields_names,)* }));
+                    result
+                }
+            }
+        }
+    } else {
+        quote! {}
+    };
+
     let iter_type = input
         .map_fields_nested_or(
             |_, field_type| quote! { <#field_type as layout::SoAIter<'a>>::Iter },
@@ -273,6 +290,8 @@ pub fn derive(input: &Input) -> TokenStream {
                 result
             }
         }
+
+        #tuple_from_iter_impl
 
         impl<'a, 'b> IntoIterator for &'a #slice_name<'b> {
             type Item = #ref_name<'a>;
