@@ -111,14 +111,15 @@ impl<T: CompactRepr> Compact<T> {
         CompactRefMut::from_value(&mut self.0)
     }
 
-    /// Returns a null pointer handle. Immutable access yields a value snapshot
-    /// with no backing storage, so there is no valid raw pointer to expose
-    /// (consistent with the owned-to-`Ref` conversion path).
+    /// Returns a direct pointer to this value, so an element pointer derived
+    /// from a `Ref` is never misclassified as null. Unlike column pointers,
+    /// it is valid only while this `Compact` lives (for the compact field of
+    /// a `Ref`, that is the `Ref` itself, not the underlying vec).
     #[inline(always)]
     pub fn as_ptr(&self) -> CompactPtr<T> {
         CompactPtr {
-            packed: core::ptr::null(),
-            index: 0,
+            packed: (&self.0 as *const T).cast(),
+            index: DIRECT_INDEX,
         }
     }
 }
@@ -241,9 +242,17 @@ impl<'a, T: CompactRepr> CompactRefMut<'a, T> {
     }
 
     pub fn as_ptr(&self) -> CompactPtr<T> {
-        CompactPtr {
-            packed: self.packed as *const Store<T>,
-            index: self.index,
+        if self.packed.is_null() {
+            // Direct/owned mode: point straight at the borrowed value.
+            CompactPtr {
+                packed: (self.direct as *const T).cast(),
+                index: DIRECT_INDEX,
+            }
+        } else {
+            CompactPtr {
+                packed: self.packed as *const Store<T>,
+                index: self.index,
+            }
         }
     }
 
@@ -1572,8 +1581,20 @@ impl<'a, T: CompactRepr + core::hash::Hash> core::hash::Hash for CompactSliceMut
 }
 
 // ---------------------------------------------------------------------------
-// CompactPtr / CompactPtrMut (packed-mode only; null in direct/owned mode)
+// CompactPtr / CompactPtrMut. A CompactPtr is either storage-backed (`packed`
+// points to a column, `index` addresses the element) or direct (`packed`
+// holds a `*const T` to a standalone `Compact<T>` value, e.g. the compact
+// field of an immutable `Ref`, and `index` is `DIRECT_INDEX`). Direct
+// pointers keep element pointers derived from a `Ref` non-null and readable
+// instead of collapsing them to null. The sentinel keeps the layout at two
+// words and leaves every storage-backed code path unchanged. CompactPtrMut
+// has no direct mode: the direct/owned mutable path still yields null.
 // ---------------------------------------------------------------------------
+
+/// `index` sentinel marking a direct `CompactPtr`. A storage-backed index can
+/// never reach `usize::MAX` (no allocation can hold that many elements), so
+/// the two modes cannot collide.
+const DIRECT_INDEX: usize = usize::MAX;
 
 #[derive(Copy, Clone)]
 pub struct CompactPtr<T: CompactRepr> {
@@ -1648,22 +1669,34 @@ impl<T: CompactRepr> CompactPtr<T> {
     ///
     /// # Safety
     ///
-    /// If non-null, `self.packed` must point to valid `Store<T>` storage and
-    /// `self.index` must address an initialized element within it. The caller
-    /// must ensure the backing storage remains live while the returned value
-    /// is used.
+    /// If non-null, `self.packed` must point to valid `Store<T>` storage
+    /// (or, for a direct pointer, to a live `T`) and `self.index` must
+    /// address an initialized element within it. The caller must ensure the
+    /// backing storage remains live while the returned value is used.
     pub unsafe fn as_ref(self) -> Option<Compact<T>> {
         if self.is_null() {
             None
+        } else if self.index == DIRECT_INDEX {
+            Some(Compact(*self.packed.cast::<T>()))
         } else {
             Some(Compact(T::decode((*self.packed).get(self.index))))
         }
     }
 
+    /// Direct pointers convert to a null mutable pointer: they borrow a
+    /// standalone value immutably, so there is no storage a write could
+    /// legally target.
     pub fn as_mut_ptr(&self) -> CompactPtrMut<T> {
-        CompactPtrMut {
-            packed: self.packed as *mut Store<T>,
-            index: self.index,
+        if self.index == DIRECT_INDEX {
+            CompactPtrMut {
+                packed: core::ptr::null_mut(),
+                index: 0,
+            }
+        } else {
+            CompactPtrMut {
+                packed: self.packed as *mut Store<T>,
+                index: self.index,
+            }
         }
     }
 
@@ -1735,10 +1768,15 @@ impl<T: CompactRepr> CompactPtr<T> {
     ///
     /// # Safety
     ///
-    /// `self.packed` must point to valid `Store<T>` storage and `self.index`
-    /// must address an initialized element within it.
+    /// `self.packed` must point to valid `Store<T>` storage (or, for a
+    /// direct pointer, to a live `T`) and `self.index` must address an
+    /// initialized element within it.
     pub unsafe fn read(self) -> Compact<T> {
-        Compact(T::decode((*self.packed).get(self.index)))
+        if self.index == DIRECT_INDEX {
+            Compact(*self.packed.cast::<T>())
+        } else {
+            Compact(T::decode((*self.packed).get(self.index)))
+        }
     }
 
     /// Reads the element the pointer references (analogous to
