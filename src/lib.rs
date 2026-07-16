@@ -72,7 +72,8 @@
 //! # }
 //! ```
 //!
-//! Mappings for first argument of ``soa_attr`` to the generated struct for ``Cheese``:
+//! Mappings for first argument of ``soa_attr`` to the generated struct for
+//! ``Cheese``:
 //! * `Vec` => `CheeseVec`
 //! * `Slice` => `CheeseSlice`
 //! * `SliceMut` => `CheeseSliceMut`
@@ -129,7 +130,10 @@
 //!     // when iterating over a CheeseVec, we load all members from memory
 //!     // in a CheeseRef
 //!     let typeof_cheese: CheeseRef = cheese;
-//!     println!("this is {}, with a smell power of {}", cheese.name, cheese.smell);
+//!     println!(
+//!         "this is {}, with a smell power of {}",
+//!         cheese.name, cheese.smell
+//!     );
 //! }
 //! # }
 //! # }
@@ -192,7 +196,8 @@
 //!
 //! ## Nested Struct of Arrays
 //!
-//! In order to nest a struct of arrays inside another struct of arrays, one can use the `#[nested_soa]` attribute.
+//! In order to nest a struct of arrays inside another struct of arrays, one can
+//! use the `#[nested_soa]` attribute.
 //!
 //! For example, the following code
 //!
@@ -222,19 +227,22 @@
 //! }
 //! pub struct ParticleVec {
 //!     point: PointVec, // rather than Vec<Point>
-//!     mass: Vec<f32>
+//!     mass: Vec<f32>,
 //! }
 //! ```
 //!
-//! All helper structs will be also nested, for example `PointSlice` will be nested in `ParticleSlice`.
+//! All helper structs will be also nested, for example `PointSlice` will be
+//! nested in `ParticleSlice`.
 //!
 //! # Use in a generic context
 //!
-//! `SOA` does not provide a set of common operations by default. Thus if you wanted to use a `SOA`
-//! type in a generic context, there is no way to guarantee to the type system that any methods are available.
+//! `SOA` does not provide a set of common operations by default. Thus if you
+//! wanted to use a `SOA` type in a generic context, there is no way to
+//! guarantee to the type system that any methods are available.
 //!
-//! This will also generate implementations of [`SoAVec`], [`SoASlice`], and [`SoASliceMut`] for the respective
-//! `Vec`, `Slice` and `SliceMut` types. These rely on GATs, and so require Rust 1.65 or newer.
+//! This will also generate implementations of [`SoAVec`], [`SoASlice`], and
+//! [`SoASliceMut`] for the respective `Vec`, `Slice` and `SliceMut` types.
+//! These rely on GATs, and so require Rust 1.65 or newer.
 //!
 //! ```ignore
 //! # mod cheese {
@@ -255,14 +263,85 @@ extern crate alloc;
 #[allow(unused_imports)]
 use alloc::{string::String, vec::Vec};
 
-// The proc macro is implemented in layout_internal, and re-exported by this
-// crate. This is because a single crate can not define both a proc macro and a
-// macro_rules macro.
+// The proc macro is implemented in layout_internal, and re-exported by
+// this crate. This is because a single crate can not define both a proc
+// macro and a macro_rules macro.
+pub use layout_internal::soa_impl;
 pub use layout_internal::SOA;
-// External dependency necessary for implementing the sorting methods.
-// It is basically used by the macro-generated code.
+
+pub mod bitpack;
+pub mod compact;
+
+// Re-exported for use in generated code. Not intended for direct use.
 #[doc(hidden)]
-pub use permutation::permutation::*;
+pub use alloc::vec::Drain;
+
+/// Trait implemented by types that can be stored in a compact (bit-packed)
+/// column: `bool` and any fieldless enum that derives `CompactRepr`.
+pub use compact::CompactRepr;
+#[doc(hidden)]
+pub use compact::{
+    Compact, CompactBool, CompactChunks, CompactChunksExact,
+    CompactChunksExactMut, CompactChunksMut, CompactDrain, CompactIter,
+    CompactIterMut, CompactPtr, CompactPtrMut, CompactRefMut, CompactSlice,
+    CompactSliceMut, CompactVec,
+};
+/// Derive macro implementing [`CompactRepr`] for a fieldless enum.
+///
+/// Requires an unsigned `#[repr(uN)]`. Storage width is sized by the
+/// largest discriminant (`1`/`2`/`4`/`8`/`16` bits). The trait and this
+/// derive share the name `CompactRepr` in the type and macro namespaces
+/// respectively (like `serde::Serialize`), so `#[derive(CompactRepr)]` and
+/// `impl CompactRepr` both resolve at the crate root.
+pub use layout_internal::CompactRepr;
+// Sorting helpers used by the macro-generated code. Inlining the inverse
+// permutation here (instead of depending on the `permutation` crate) keeps
+// this crate `no_std` + `alloc` only — the `permutation` crate needs `std`.
+#[doc(hidden)]
+pub fn __invert_permutation(argsort: &[usize]) -> Vec<usize> {
+    // `dest[src]` = the sorted position of the element currently at `src`.
+    // `argsort[pos] = src`, so invert by assigning `dest[argsort[pos]] = pos`.
+    let mut dest = alloc::vec![0usize; argsort.len()];
+    for (pos, &src) in argsort.iter().enumerate() {
+        dest[src] = pos;
+    }
+    dest
+}
+
+/// Apply a destination permutation in place: `dest[i]` is the index the
+/// element at `i` should move to. Used by generated code for plain `&mut [T]`
+/// columns. Follows each cycle moving values (works for non-`Copy` `T`).
+#[doc(hidden)]
+pub fn __apply_permutation_inplace<T>(slice: &mut [T], dest: &[usize]) {
+    let len = slice.len();
+    debug_assert_eq!(dest.len(), len);
+    let mut visited = alloc::vec![false; len];
+    for start in 0..len {
+        if visited[start] {
+            continue;
+        }
+        visited[start] = true;
+        let mut current = start;
+        // SAFETY: `current` walks the cycle start -> dest[start] -> ...; every
+        // index is visited exactly once. `temp` always holds the value that
+        // belongs at the next slot; we move it in and keep the displaced value,
+        // closing the cycle by writing into `start` when we return to it. No
+        // panic can occur inside this block, so no slot is left uninitialized.
+        unsafe {
+            let mut temp = core::ptr::read(&slice[start]);
+            loop {
+                let next = dest[current];
+                if next == start {
+                    core::ptr::write(&mut slice[start], temp);
+                    break;
+                }
+                temp = core::ptr::replace(&mut slice[next], temp);
+                visited[next] = true;
+                current = next;
+            }
+        }
+    }
+}
 
 /// Any struct derived by SOA will auto impl this trait You can use
 /// `<Cheese as SOA>::Type` instead of explicit named type
@@ -276,9 +355,11 @@ pub trait SOA {
 ///
 /// Useful for generic programming and implementation of attribute `nested_soa`.
 ///
-/// `CheeseVec::iter(&'a self)` returns an iterator which has a type `<Cheese as SoAIter<'a>>::Iter`
+/// `CheeseVec::iter(&'a self)` returns an iterator which has a type `<Cheese as
+/// SoAIter<'a>>::Iter`
 ///
-/// `CheeseVec::iter_mut(&mut 'a self)` returns an iterator which has a type `<Cheese as SoAIter<'a>>::IterMut`
+/// `CheeseVec::iter_mut(&mut 'a self)` returns an iterator which has a type
+/// `<Cheese as SoAIter<'a>>::IterMut`
 pub trait SoAIter<'a> {
     type Ref;
     type RefMut;
@@ -413,7 +494,8 @@ macro_rules! soa_zip {
     }};
 }
 
-/// This trait is automatically implemented by the relevant generated by [`SOA`].
+/// This trait is automatically implemented by the relevant generated by
+/// [`SOA`].
 ///
 /// Links a [`SOA`] type to its raw pointer types, which is useful for generic
 /// programming.
@@ -437,7 +519,8 @@ mod generics {
             Self: 't;
 
         /// The type representing immutable slices of elements
-        type Slice<'t>: SoASlice<T> + IntoSoAIter<'t, T, Ref<'t> = Self::Ref<'t>>
+        type Slice<'t>: SoASlice<T>
+            + IntoSoAIter<'t, T, Ref<'t> = Self::Ref<'t>>
         where
             Self: 't;
 
@@ -501,7 +584,8 @@ mod generics {
             Self: 't;
 
         /// The type representing immutable slices of elements
-        type Slice<'t>: SoASlice<T> + IntoSoAIter<'t, T, Ref<'t> = Self::Ref<'t>>
+        type Slice<'t>: SoASlice<T>
+            + IntoSoAIter<'t, T, Ref<'t> = Self::Ref<'t>>
         where
             Self: 't;
 
@@ -578,7 +662,10 @@ mod generics {
 
         /// Create a mutable slice of this vector matching the given
         /// `range`. This is analogous to `IndexMut<Range<usize>>`.
-        fn slice_mut(&mut self, index: impl core::ops::RangeBounds<usize>) -> Self::SliceMut<'_>;
+        fn slice_mut(
+            &mut self,
+            index: impl core::ops::RangeBounds<usize>,
+        ) -> Self::SliceMut<'_>;
 
         /// Analogous to [`slice::get_mut()`](https://doc.rust-lang.org/std/primitive.slice.html#method.get_mut)
         fn get_mut(&mut self, index: usize) -> Option<Self::RefMut<'_>>;
@@ -723,7 +810,10 @@ mod generics {
 
         /// Create a mutable slice of this vector matching the given
         /// `range`. This is analogous to `IndexMut<Range<usize>>`.
-        fn slice_mut(&mut self, index: impl core::ops::RangeBounds<usize>) -> Self::SliceMut<'_>;
+        fn slice_mut(
+            &mut self,
+            index: impl core::ops::RangeBounds<usize>,
+        ) -> Self::SliceMut<'_>;
 
         /// Analogous to [`slice::get_mut()`](https://doc.rust-lang.org/std/primitive.slice.html#method.get_mut)
         fn get_mut(&mut self, index: usize) -> Option<Self::RefMut<'_>>;
@@ -796,7 +886,8 @@ mod generics {
         /// Analogous to [`Vec::truncate`]
         fn truncate(&mut self, len: usize);
 
-        /// Add a singular value of `T` to the arrays. Analogous to [`Vec::push`]
+        /// Add a singular value of `T` to the arrays. Analogous to
+        /// [`Vec::push`]
         fn push(&mut self, value: T);
 
         /// Analogous to [`Vec::swap_remove`]
@@ -824,8 +915,8 @@ mod generics {
         fn split_off(&mut self, at: usize) -> Self;
     }
 
-    /// A trait to implement `Clone`-dependent behavior to convert a non-owning SoA type into an
-    /// owning [`SoAVec`].
+    /// A trait to implement `Clone`-dependent behavior to convert a non-owning
+    /// SoA type into an owning [`SoAVec`].
     pub trait ToSoAVec<T: SOA> {
         type SoAVecType: SoAVec<T>;
 
@@ -833,14 +924,15 @@ mod generics {
         fn to_vec(&self) -> Self::SoAVecType;
     }
 
-    /// A trait to implement `Clone`-dependent behavior to extend an [`SoAVec`] with data copied
-    /// from its associated `Slice` type.
+    /// A trait to implement `Clone`-dependent behavior to extend an [`SoAVec`]
+    /// with data copied from its associated `Slice` type.
     pub trait SoAAppendVec<T: SOA>: SoAVec<T> {
         /// Analogous to [`Vec::extend_from_slice`]
         fn extend_from_slice(&mut self, other: Self::Slice<'_>);
     }
 
-    /// A trait to express the [`IntoIterator`] guarantee of [`SoASlice`] types in the type system.
+    /// A trait to express the [`IntoIterator`] guarantee of [`SoASlice`] types
+    /// in the type system.
     pub trait IntoSoAIter<'a, T: SOA>:
         SoASlice<T> + IntoIterator<Item = Self::Ref<'a>> + 'a
     {

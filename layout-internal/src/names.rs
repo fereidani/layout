@@ -1,5 +1,5 @@
-use proc_macro2::Span;
-use quote::ToTokens;
+use proc_macro2::{Span, TokenStream};
+use quote::{quote, ToTokens};
 use syn::Ident;
 
 /// Get the ident for the `Vec` type associated with `name`
@@ -63,4 +63,73 @@ pub fn ptr_mut_name(name: impl ToTokens) -> Ident {
         &format!("{}PtrMut", name.to_token_stream()),
         Span::call_site(),
     )
+}
+
+/// Get the ident for the drain type associated with `name`
+pub fn drain_name(name: impl ToTokens) -> Ident {
+    Ident::new(
+        &format!("{}Drain", name.to_token_stream()),
+        Span::call_site(),
+    )
+}
+
+/// Get the ident for the chunks iterator type associated with `name`
+pub fn chunks_name(name: impl ToTokens) -> Ident {
+    Ident::new(
+        &format!("{}Chunks", name.to_token_stream()),
+        Span::call_site(),
+    )
+}
+
+/// Get the ident for the mutable chunks iterator type associated with `name`
+pub fn chunks_mut_name(name: impl ToTokens) -> Ident {
+    Ident::new(
+        &format!("{}ChunksMut", name.to_token_stream()),
+        Span::call_site(),
+    )
+}
+
+/// Get the ident for the exact chunks iterator type associated with `name`
+pub fn chunks_exact_name(name: impl ToTokens) -> Ident {
+    Ident::new(
+        &format!("{}ChunksExact", name.to_token_stream()),
+        Span::call_site(),
+    )
+}
+
+/// Get the ident for the mutable exact chunks iterator type associated with
+/// `name`
+pub fn chunks_exact_mut_name(name: impl ToTokens) -> Ident {
+    Ident::new(
+        &format!("{}ChunksExactMut", name.to_token_stream()),
+        Span::call_site(),
+    )
+}
+
+pub fn vec_name_compact(inner: &syn::Type) -> TokenStream {
+    quote! { ::layout::CompactVec<#inner> }
+}
+
+pub fn slice_name_compact(inner: &syn::Type) -> TokenStream {
+    quote! { ::layout::CompactSlice<'a, #inner> }
+}
+
+pub fn slice_mut_name_compact(inner: &syn::Type) -> TokenStream {
+    quote! { ::layout::CompactSliceMut<'a, #inner> }
+}
+
+pub fn ref_mut_name_compact(inner: &syn::Type) -> TokenStream {
+    quote! { ::layout::CompactRefMut<'a, #inner> }
+}
+
+pub fn ptr_name_compact(inner: &syn::Type) -> TokenStream {
+    quote! { ::layout::CompactPtr<#inner> }
+}
+
+pub fn ptr_mut_name_compact(inner: &syn::Type) -> TokenStream {
+    quote! { ::layout::CompactPtrMut<#inner> }
+}
+
+pub fn drain_name_compact(inner: &syn::Type) -> TokenStream {
+    quote! { ::layout::CompactDrain<'a, #inner> }
 }

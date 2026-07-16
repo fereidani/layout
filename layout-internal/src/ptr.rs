@@ -29,9 +29,9 @@ pub fn derive(input: &Input) -> TokenStream {
 
     let ptr_fields_types = input
         .map_fields_nested_or(
-            |_, field_type| {
-                let field_ptr_type = names::ptr_name(field_type);
-                quote! { #field_ptr_type }
+            |_, field_type, compact| if let Some(inner) = compact { names::ptr_name_compact(inner) } else {
+                let id = names::ptr_name(field_type);
+                quote! { #id }
             },
             |_, field_type| quote! { *const #field_type },
         )
@@ -39,9 +39,9 @@ pub fn derive(input: &Input) -> TokenStream {
 
     let ptr_mut_fields_types = input
         .map_fields_nested_or(
-            |_, field_type| {
-                let field_ptr_type = names::ptr_mut_name(field_type);
-                quote! { #field_ptr_type }
+            |_, field_type, compact| if let Some(inner) = compact { names::ptr_mut_name_compact(inner) } else {
+                let id = names::ptr_mut_name(field_type);
+                quote! { #id }
             },
             |_, field_type| quote! { *mut #field_type },
         )
@@ -49,17 +49,26 @@ pub fn derive(input: &Input) -> TokenStream {
 
     let as_ptr = input
         .map_fields_nested_or(
-            |ident, _| quote! { self.#ident.as_ptr() },
+            |ident, _, _| quote! { self.#ident.as_ptr() },
             |ident, _| quote! { self.#ident as *const _ },
         )
         .collect::<Vec<_>>();
 
     let as_mut_ptr = input
         .map_fields_nested_or(
-            |ident, _| quote! { self.#ident.as_mut_ptr() },
+            |ident, _, _| quote! { self.#ident.as_mut_ptr() },
             |ident, _| quote! { self.#ident as *mut _ },
         )
         .collect::<Vec<_>>();
+
+    // The Ref construction sites below use trailing-comma field lists, so the
+    // marker init carries no leading comma. Only non-empty for all-compact
+    // structs (whose `Ref<'a>` needs a PhantomData marker to use its lifetime).
+    let ref_marker_init: TokenStream = if input.ref_needs_lifetime_marker() {
+        quote! { __layout_ref_marker: ::core::marker::PhantomData }
+    } else {
+        quote! {}
+    };
 
     quote! {
         /// An analog of a pointer to
@@ -122,6 +131,7 @@ pub fn derive(input: &Input) -> TokenStream {
                 } else {
                     Some(#ref_name {
                         #(#fields_names: self.#fields_names.as_ref().expect("should not be null"), )*
+                        #ref_marker_init
                     })
                 }
             }
@@ -202,7 +212,6 @@ pub fn derive(input: &Input) -> TokenStream {
         }
 
         #[allow(dead_code)]
-        #[allow(clippy::forget_non_drop)]
         impl #ptr_mut_name {
             /// Convert a
             #[doc = #ptr_mut_doc_url]
@@ -228,6 +237,7 @@ pub fn derive(input: &Input) -> TokenStream {
                 } else {
                     Some(#ref_name {
                         #(#fields_names: self.#fields_names.as_ref().expect("should not be null"), )*
+                        #ref_marker_init
                     })
                 }
             }
@@ -317,38 +327,32 @@ pub fn derive(input: &Input) -> TokenStream {
 
             /// Similar to [`*mut T::write()`](https://doc.rust-lang.org/std/primitive.pointer.html#method.write),
             /// with the same safety caveats.
-            #[allow(clippy::forget_non_drop)]
             pub unsafe fn write(self, val: #name) {
+                // ManuallyDrop: fields are read out via ptr::read, so a mid-write unwind can't double-free them.
+                let mut val = ::core::mem::ManuallyDrop::new(val);
                 unsafe {
                     #(self.#fields_names.write(::core::ptr::read(&val.#fields_names));)*
                 }
-                // if val implements Drop, we don't want to run it here, only
-                // when the vec itself will be dropped
-                ::core::mem::forget(val);
             }
 
             /// Similar to [`*mut T::write_volatile()`](https://doc.rust-lang.org/std/primitive.pointer.html#method.write_volatile),
             /// with the same safety caveats.
-            #[allow(clippy::forget_non_drop)]
             pub unsafe fn write_volatile(self, val: #name) {
+                // See `write`: ManuallyDrop prevents a double-free on unwind.
+                let mut val = ::core::mem::ManuallyDrop::new(val);
                 unsafe {
                     #(self.#fields_names.write_volatile(::core::ptr::read(&val.#fields_names));)*
                 }
-                // if val implements Drop, we don't want to run it here, only
-                // when the vec itself will be dropped
-                ::core::mem::forget(val);
             }
 
             /// Similar to [`*mut T::write_unaligned()`](https://doc.rust-lang.org/std/primitive.pointer.html#method.write_unaligned),
             /// with the same safety caveats.
-            #[allow(clippy::forget_non_drop)]
             pub unsafe fn write_unaligned(self, val: #name) {
+                // See `write`: ManuallyDrop prevents a double-free on unwind.
+                let mut val = ::core::mem::ManuallyDrop::new(val);
                 unsafe {
                     #(self.#fields_names.write_unaligned(::core::ptr::read(&val.#fields_names));)*
                 }
-                // if val implements Drop, we don't want to run it here, only
-                // when the vec itself will be dropped
-                ::core::mem::forget(val);
             }
         }
 

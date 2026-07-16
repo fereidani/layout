@@ -33,14 +33,22 @@ pub fn derive(input: &Input) -> TokenStream {
         .fields
         .iter()
         .enumerate()
-        .map(|(i, _)| Ident::new(&format!("___layout_private_{}", i), Span::call_site()))
+        .map(|(i, _)| {
+            Ident::new(&format!("___layout_private_{}", i), Span::call_site())
+        })
         .collect::<Vec<_>>();
 
     let ref_fields_types = input
         .map_fields_nested_or(
-            |_, field_type| {
-                let field_ptr_type = names::ref_name(field_type);
-                quote! { #field_ptr_type<'a> }
+            |_, field_type, compact| {
+                // Immutable access to a compact field yields the owning
+                // `Compact<T>` value (Copy snapshot).
+                if compact.is_some() {
+                    quote! { #field_type }
+                } else {
+                    let field_ptr_type = names::ref_name(field_type);
+                    quote! { #field_ptr_type<'a> }
+                }
             },
             |_, field_type| quote! { &'a #field_type },
         )
@@ -48,7 +56,7 @@ pub fn derive(input: &Input) -> TokenStream {
 
     let ref_mut_fields_types = input
         .map_fields_nested_or(
-            |_, field_type| {
+            |_, field_type, compact| if let Some(inner) = compact { names::ref_mut_name_compact(inner) } else {
                 let field_ptr_type = names::ref_mut_name(field_type);
                 quote! { #field_ptr_type<'a> }
             },
@@ -58,31 +66,64 @@ pub fn derive(input: &Input) -> TokenStream {
 
     let as_ref = input
         .map_fields_nested_or(
-            |ident, _| quote! { self.#ident.as_ref() },
+            |ident, _, compact| {
+                // Compact<T> is Copy: snapshot the value directly.
+                if compact.is_some() {
+                    quote! { self.#ident }
+                } else {
+                    quote! { self.#ident.as_ref() }
+                }
+            },
             |ident, _| quote! { &self.#ident },
         )
         .collect::<Vec<_>>();
 
     let as_mut = input
         .map_fields_nested_or(
-            |ident, _| quote! { self.#ident.as_mut() },
+            |ident, _, _| quote! { self.#ident.as_mut() },
             |ident, _| quote! { &mut self.#ident },
         )
         .collect::<Vec<_>>();
 
     let to_owned = input
         .map_fields_nested_or(
-            |ident, _| quote! { self.#ident.to_owned() },
+            |ident, _, compact| {
+                // Works for both Ref (field: Compact<T>) and RefMut
+                // (field: CompactRefMut<T>): read via `.get()`.
+                if compact.is_some() {
+                    quote! { ::layout::Compact::new(self.#ident.get()) }
+                } else {
+                    quote! { self.#ident.to_owned() }
+                }
+            },
             |ident, _| quote! { self.#ident.clone() },
         )
         .collect::<Vec<_>>();
 
     let ref_replace = input
         .map_fields_nested_or(
-            |ident, _| quote! { self.#ident.replace(field) },
+            |ident, _, _| quote! { self.#ident.replace(field) },
             |ident, _| quote! { ::core::mem::replace(&mut *self.#ident, field) },
         )
         .collect::<Vec<_>>();
+
+    // When every field is compact, the immutable `Ref<'a>` would otherwise have
+    // an unused lifetime; add a hidden PhantomData marker to keep it structural.
+    let ref_marker_field: TokenStream = if input.ref_needs_lifetime_marker() {
+        quote! {
+            #[doc(hidden)]
+            __layout_ref_marker: ::core::marker::PhantomData<&'a ()>,
+        }
+    } else {
+        quote! {}
+    };
+    // `as_ref` builds the ref with a trailing-comma field list, so the init
+    // carries no leading comma.
+    let ref_marker_init: TokenStream = if input.ref_needs_lifetime_marker() {
+        quote! { __layout_ref_marker: ::core::marker::PhantomData }
+    } else {
+        quote! {}
+    };
 
     quote! {
         /// A reference to a
@@ -100,6 +141,7 @@ pub fn derive(input: &Input) -> TokenStream {
                 #[doc = #vec_doc_url]
                 pub #fields_names: #ref_fields_types,
             )*
+            #ref_marker_field
         }
 
         /// A mutable reference to a
@@ -128,6 +170,7 @@ pub fn derive(input: &Input) -> TokenStream {
             #visibility fn as_ref(&self) -> #ref_name {
                 #ref_name {
                     #( #fields_names: #as_ref, )*
+                    #ref_marker_init
                 }
             }
 
@@ -187,15 +230,13 @@ pub fn derive(input: &Input) -> TokenStream {
             }
 
             /// Similar to [`core::mem::replace()`](https://doc.rust-lang.org/std/mem/fn.replace.html).
-            #[allow(clippy::forget_non_drop)]
             pub fn replace(&mut self, val: #name) -> #name {
+                // ManuallyDrop: fields are read out via ptr::read, so a mid-replace unwind can't double-free them.
+                let mut val = ::core::mem::ManuallyDrop::new(val);
                 #(
                     let field = unsafe { ::core::ptr::read(&val.#fields_names) };
                     let #fields_names_hygienic = #ref_replace;
                 )*
-                // if val implements Drop, we don't want to run it here, only
-                // when the vec itself will be dropped
-                ::core::mem::forget(val);
 
                 #name{#(#fields_names: #fields_names_hygienic),*}
             }

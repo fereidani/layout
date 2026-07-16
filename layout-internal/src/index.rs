@@ -19,29 +19,38 @@ pub fn derive(input: &Input) -> TokenStream {
 
     let get_unchecked = input
         .map_fields_nested_or(
-            |ident, _| quote! { ::layout::SoAIndex::get_unchecked(self.clone(), slice.#ident) },
+            |ident, _, _| quote! { ::layout::SoAIndex::get_unchecked(self.clone(), slice.#ident) },
             |ident, _| quote! { slice.#ident.get_unchecked(self.clone()) },
         )
         .collect::<Vec<_>>();
 
     let get_unchecked_mut = input.map_fields_nested_or(
-        |ident, _| quote! { ::layout::SoAIndexMut::get_unchecked_mut(self.clone(), slice.#ident) },
+        |ident, _, _| quote! { ::layout::SoAIndexMut::get_unchecked_mut(self.clone(), slice.#ident) },
         |ident, _| quote! { slice.#ident.get_unchecked_mut(self.clone()) },
     ).collect::<Vec<_>>();
 
     let index = input
         .map_fields_nested_or(
-            |ident, _| quote! { ::layout::SoAIndex::index(self.clone(), slice.#ident) },
+            |ident, _, _| quote! { ::layout::SoAIndex::index(self.clone(), slice.#ident) },
             |ident, _| quote! { & slice.#ident[self.clone()] },
         )
         .collect::<Vec<_>>();
 
     let index_mut = input
         .map_fields_nested_or(
-            |ident, _| quote! { ::layout::SoAIndexMut::index_mut(self.clone(), slice.#ident) },
+            |ident, _, _| quote! { ::layout::SoAIndexMut::index_mut(self.clone(), slice.#ident) },
             |ident, _| quote! { &mut slice.#ident[self.clone()] },
         )
         .collect::<Vec<_>>();
+
+    // The Ref construction sites below use trailing-comma field lists, so the
+    // marker init carries no leading comma. Only non-empty for all-compact
+    // structs (whose `Ref<'a>` needs a PhantomData marker to use its lifetime).
+    let ref_marker_init: TokenStream = if input.ref_needs_lifetime_marker() {
+        quote! { __layout_ref_marker: ::core::marker::PhantomData }
+    } else {
+        quote! {}
+    };
 
     quote! {
         // usize
@@ -264,18 +273,18 @@ pub fn derive(input: &Input) -> TokenStream {
                 if *self.end() == usize::MAX {
                     None
                 } else {
-                    ::layout::SoAIndex::get(*self.start()..self.end() + 1, soa)
+                    ::layout::SoAIndex::get(*self.start()..self.end().saturating_add(1), soa)
                 }
             }
 
             #[inline]
             unsafe fn get_unchecked(self, soa: &'a #vec_name) -> Self::RefOutput {
-                ::layout::SoAIndex::get_unchecked(*self.start()..self.end() + 1, soa)
+                ::layout::SoAIndex::get_unchecked(*self.start()..self.end().saturating_add(1), soa)
             }
 
             #[inline]
             fn index(self, soa: &'a #vec_name) -> Self::RefOutput {
-                ::layout::SoAIndex::index(*self.start()..self.end() + 1, soa)
+                ::layout::SoAIndex::index(*self.start()..self.end().saturating_add(1), soa)
             }
         }
 
@@ -287,18 +296,18 @@ pub fn derive(input: &Input) -> TokenStream {
                 if *self.end() == usize::MAX {
                     None
                 } else {
-                    ::layout::SoAIndexMut::get_mut(*self.start()..self.end() + 1, soa)
+                    ::layout::SoAIndexMut::get_mut(*self.start()..self.end().saturating_add(1), soa)
                 }
             }
 
             #[inline]
             unsafe fn get_unchecked_mut(self, soa: &'a mut #vec_name) -> Self::MutOutput {
-                ::layout::SoAIndexMut::get_unchecked_mut(*self.start()..self.end() + 1, soa)
+                ::layout::SoAIndexMut::get_unchecked_mut(*self.start()..self.end().saturating_add(1), soa)
             }
 
             #[inline]
             fn index_mut(self, soa: &'a mut #vec_name) -> Self::MutOutput {
-                ::layout::SoAIndexMut::index_mut(*self.start()..self.end() + 1, soa)
+                ::layout::SoAIndexMut::index_mut(*self.start()..self.end().saturating_add(1), soa)
             }
         }
 
@@ -358,6 +367,7 @@ pub fn derive(input: &Input) -> TokenStream {
             unsafe fn get_unchecked(self, slice: #slice_name<'a>) -> Self::RefOutput {
                 #ref_name {
                     #( #fields_names: #get_unchecked, )*
+                    #ref_marker_init
                 }
             }
 
@@ -365,6 +375,7 @@ pub fn derive(input: &Input) -> TokenStream {
             fn index(self, slice: #slice_name<'a>) -> Self::RefOutput {
                 #ref_name {
                     #( #fields_names: #index, )*
+                    #ref_marker_init
                 }
             }
         }
@@ -584,18 +595,18 @@ pub fn derive(input: &Input) -> TokenStream {
                 if *self.end() == usize::MAX {
                     None
                 } else {
-                    ::layout::SoAIndex::get(*self.start()..self.end() + 1, slice)
+                    ::layout::SoAIndex::get(*self.start()..self.end().saturating_add(1), slice)
                 }
             }
 
             #[inline]
             unsafe fn get_unchecked(self, slice: #slice_name<'a>) -> Self::RefOutput {
-                ::layout::SoAIndex::get_unchecked(*self.start()..self.end() + 1, slice)
+                ::layout::SoAIndex::get_unchecked(*self.start()..self.end().saturating_add(1), slice)
             }
 
             #[inline]
             fn index(self, slice: #slice_name<'a>) -> Self::RefOutput {
-                ::layout::SoAIndex::index(*self.start()..self.end() + 1, slice)
+                ::layout::SoAIndex::index(*self.start()..self.end().saturating_add(1), slice)
             }
         }
 
@@ -607,18 +618,18 @@ pub fn derive(input: &Input) -> TokenStream {
                 if *self.end() == usize::MAX {
                     None
                 } else {
-                    ::layout::SoAIndexMut::get_mut(*self.start()..self.end() + 1, slice)
+                    ::layout::SoAIndexMut::get_mut(*self.start()..self.end().saturating_add(1), slice)
                 }
             }
 
             #[inline]
             unsafe fn get_unchecked_mut(self, slice: #slice_mut_name<'a>) -> Self::MutOutput {
-                ::layout::SoAIndexMut::get_unchecked_mut(*self.start()..self.end() + 1, slice)
+                ::layout::SoAIndexMut::get_unchecked_mut(*self.start()..self.end().saturating_add(1), slice)
             }
 
             #[inline]
             fn index_mut(self, slice: #slice_mut_name<'a>) -> Self::MutOutput {
-                ::layout::SoAIndexMut::index_mut(*self.start()..self.end() + 1, slice)
+                ::layout::SoAIndexMut::index_mut(*self.start()..self.end().saturating_add(1), slice)
             }
         }
 

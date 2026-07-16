@@ -36,7 +36,7 @@ pub fn derive_slice(input: &Input) -> TokenStream {
                 };
                 let n = self.len();
                 let end = match index.end_bound() {
-                    core::ops::Bound::Included(i) => (*i + 1).min(n),
+                    core::ops::Bound::Included(i) => (*i).saturating_add(1).min(n),
                     core::ops::Bound::Excluded(i) => *i,
                     core::ops::Bound::Unbounded => n,
                 };
@@ -111,7 +111,7 @@ pub fn derive_slice_mut(input: &Input) -> TokenStream {
                 };
                 let n = self.len();
                 let end = match index.end_bound() {
-                    core::ops::Bound::Included(i) => (*i + 1).min(n),
+                    core::ops::Bound::Included(i) => (*i).saturating_add(1).min(n),
                     core::ops::Bound::Excluded(i) => *i,
                     core::ops::Bound::Unbounded => n,
                 };
@@ -146,7 +146,7 @@ pub fn derive_slice_mut(input: &Input) -> TokenStream {
                 };
                 let n = self.len();
                 let end = match index.end_bound() {
-                    core::ops::Bound::Included(i) => (*i + 1).min(n),
+                    core::ops::Bound::Included(i) => (*i).saturating_add(1).min(n),
                     core::ops::Bound::Excluded(i) => *i,
                     core::ops::Bound::Unbounded => n,
                 };
@@ -170,7 +170,8 @@ pub fn derive_slice_mut(input: &Input) -> TokenStream {
 
             #[inline]
             fn apply_index(&mut self, indices: &[usize]) {
-                self.__private_apply_permutation(&mut ::layout::Permutation::oneline(indices).inverse());
+                let dest = ::layout::__invert_permutation(indices);
+                self.__private_apply_permutation(&dest);
             }
 
             #[inline]
@@ -236,7 +237,7 @@ pub fn derive_vec(input: &Input) -> TokenStream {
                 };
                 let n = self.len();
                 let end = match index.end_bound() {
-                    core::ops::Bound::Included(i) => (*i + 1).min(n),
+                    core::ops::Bound::Included(i) => (*i).saturating_add(1).min(n),
                     core::ops::Bound::Excluded(i) => *i,
                     core::ops::Bound::Unbounded => n,
                 };
@@ -271,7 +272,7 @@ pub fn derive_vec(input: &Input) -> TokenStream {
                 };
                 let n = self.len();
                 let end = match index.end_bound() {
-                    core::ops::Bound::Included(i) => (*i + 1).min(n),
+                    core::ops::Bound::Included(i) => (*i).saturating_add(1).min(n),
                     core::ops::Bound::Excluded(i) => *i,
                     core::ops::Bound::Unbounded => n,
                 };

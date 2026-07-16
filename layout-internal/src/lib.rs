@@ -11,11 +11,13 @@ use quote::TokenStreamExt;
 mod index;
 #[macro_use]
 mod input;
+mod compact_repr;
 mod generic;
 mod iter;
 mod ptr;
 mod refs;
 mod slice;
+mod soa_impl;
 mod vec;
 
 pub(crate) mod names;
@@ -54,4 +56,20 @@ fn derive_trait(input: &Input) -> TokenStream {
             type Type = #vec_name;
         }
     }
+}
+
+#[allow(clippy::used_underscore_binding)]
+#[proc_macro_attribute]
+pub fn soa_impl(
+    _attr: proc_macro::TokenStream,
+    item: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    soa_impl::soa_impl_transform(item)
+}
+
+#[proc_macro_derive(CompactRepr)]
+pub fn compact_repr(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let ast = syn::parse(input)
+        .expect("Failed to parse derive macro for CompactRepr");
+    compact_repr::derive_compact_repr(&ast).into()
 }

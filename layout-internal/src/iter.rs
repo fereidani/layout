@@ -35,7 +35,7 @@ pub fn derive(input: &Input) -> TokenStream {
 
     let iter_type = input
         .map_fields_nested_or(
-            |_, field_type| quote! { <#field_type as layout::SoAIter<'a>>::Iter },
+            |_, field_type, _| quote! { <#field_type as layout::SoAIter<'a>>::Iter },
             |_, field_type| quote! { ::core::slice::Iter<'a, #field_type> },
         )
         .concat_by(|seq, next| {
@@ -44,7 +44,7 @@ pub fn derive(input: &Input) -> TokenStream {
 
     let iter_mut_type = input
         .map_fields_nested_or(
-            |_, field_type| quote! { <#field_type as layout::SoAIter<'a>>::IterMut },
+            |_, field_type, _| quote! { <#field_type as layout::SoAIter<'a>>::IterMut },
             |_, field_type| quote! { ::core::slice::IterMut<'a, #field_type> },
         )
         .concat_by(|seq, next| {
@@ -53,7 +53,7 @@ pub fn derive(input: &Input) -> TokenStream {
 
     let create_into_iter = input
         .map_fields_nested_or(
-            |ident, _| quote! { self.#ident.into_iter() },
+            |ident, _, _| quote! { self.#ident.into_iter() },
             |ident, _| quote! { self.#ident.iter() },
         )
         .concat_by(|seq, next| {
@@ -62,7 +62,7 @@ pub fn derive(input: &Input) -> TokenStream {
 
     let create_mut_into_iter = input
         .map_fields_nested_or(
-            |ident, _| quote! { self.#ident.into_iter() },
+            |ident, _, _| quote! { self.#ident.into_iter() },
             |ident, _| quote! { self.#ident.iter_mut() },
         )
         .concat_by(|seq, next| {
@@ -102,6 +102,15 @@ pub fn derive(input: &Input) -> TokenStream {
         })
         .expect("should be Some");
 
+    // The Ref construction sites below use trailing-comma field-init shorthand,
+    // so the marker init carries no leading comma. Only non-empty for
+    // all-compact structs.
+    let ref_marker_init: TokenStream = if input.ref_needs_lifetime_marker() {
+        quote! { __layout_ref_marker: ::core::marker::PhantomData }
+    } else {
+        quote! {}
+    };
+
     let generated = quote! {
         /// Iterator over
         #[doc = #doc_url]
@@ -114,7 +123,7 @@ pub fn derive(input: &Input) -> TokenStream {
             #[inline]
             fn next(&mut self) -> Option<#ref_name<'a>> {
                 match self.0.next() {
-                    Some(#iter_pat) => Some(#ref_name { #(#fields_names,)* }),
+                    Some(#iter_pat) => Some(#ref_name { #(#fields_names,)* #ref_marker_init }),
                     None => None,
                 }
             }
@@ -131,6 +140,7 @@ pub fn derive(input: &Input) -> TokenStream {
                 self.0.next_back().and_then(|#iter_pat|
                     Some(#ref_name{
                         #(#fields_names,)*
+                        #ref_marker_init
                     })
                 )
             }

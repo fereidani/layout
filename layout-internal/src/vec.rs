@@ -17,6 +17,7 @@ pub fn derive(input: &Input) -> TokenStream {
     let ref_mut_name = names::ref_mut_name(&input.name);
     let ptr_name = names::ptr_name(&input.name);
     let ptr_mut_name = names::ptr_mut_name(&input.name);
+    let drain_name = names::drain_name(&input.name);
 
     let doc_url = format!("[`{0}`](struct.{0}.html)", input.name);
 
@@ -26,21 +27,22 @@ pub fn derive(input: &Input) -> TokenStream {
         .map(|field| field.ident.as_ref().unwrap())
         .collect::<Vec<_>>();
 
-
     let fields_names_hygienic = input
         .fields
         .iter()
         .enumerate()
-        .map(|(i, _)| Ident::new(&format!("___layout_private_{}", i), Span::call_site()))
+        .map(|(i, _)| {
+            Ident::new(&format!("___layout_private_{}", i), Span::call_site())
+        })
         .collect::<Vec<_>>();
 
     let first_field = &fields_names[0];
 
     let vec_fields_types = input
         .map_fields_nested_or(
-            |_, field_type| {
-                let vec_type = names::vec_name(field_type);
-                quote! { #vec_type }
+            |_, field_type, compact| if let Some(inner) = compact { names::vec_name_compact(inner) } else {
+                let t = names::vec_name(field_type);
+                quote! { #t }
             },
             |_, field_type| quote! { Vec<#field_type> },
         )
@@ -48,30 +50,37 @@ pub fn derive(input: &Input) -> TokenStream {
 
     let vec_with_capacity = input
         .map_fields_nested_or(
-            |_, field_type| quote! { <#field_type as SOA>::Type::with_capacity(capacity) },
+            |_, field_type, _| quote! { <#field_type as SOA>::Type::with_capacity(capacity) },
             |_, _| quote! { Vec::with_capacity(capacity) },
         )
         .collect::<Vec<_>>();
 
     let vec_slice = input
         .map_fields_nested_or(
-            |ident, _| quote! { self.#ident.slice(range.clone()) },
+            |ident, _, _| quote! { self.#ident.slice(range.clone()) },
             |ident, _| quote! { &self.#ident[range.clone()] },
         )
         .collect::<Vec<_>>();
 
     let vec_slice_mut = input
         .map_fields_nested_or(
-            |ident, _| quote! { self.#ident.slice_mut(range.clone()) },
+            |ident, _, _| quote! { self.#ident.slice_mut(range.clone()) },
             |ident, _| quote! { &mut self.#ident[range.clone()] },
         )
         .collect::<Vec<_>>();
 
     let vec_from_raw_parts = input
         .map_fields_nested_or(
-            |ident, field_type| {
-                let vec_type = names::vec_name(field_type);
-                quote! { #vec_type::from_raw_parts(data.#ident, len, capacity) }
+            |ident, field_type, compact| {
+                let vec_type = if let Some(inner) = compact { names::vec_name_compact(inner) } else {
+                    let t = names::vec_name(field_type);
+                    quote! { #t }
+                };
+                if compact.is_some() {
+                    quote! { <#vec_type>::from_raw_parts(data.#ident) }
+                } else {
+                    quote! { <#vec_type>::from_raw_parts(data.#ident, len, capacity) }
+                }
             },
             |ident, _| quote! { Vec::from_raw_parts(data.#ident, len, capacity) },
         )
@@ -79,8 +88,18 @@ pub fn derive(input: &Input) -> TokenStream {
 
     let vec_replace = input
         .map_fields_nested_or(
-            |ident, _| quote! { self.#ident.replace(index, field) },
+            |ident, _, _| quote! { self.#ident.replace(index, field) },
             |ident, _| quote! { ::core::mem::replace(&mut self.#ident[index], field) },
+        )
+        .collect::<Vec<_>>();
+
+    let drain_fields_types = input
+        .map_fields_nested_or(
+            |_, field_type, compact| if let Some(inner) = compact { names::drain_name_compact(inner) } else {
+                let t = names::drain_name(field_type);
+                quote! { #t<'a> }
+            },
+            |_, field_type| quote! { ::layout::Drain<'a, #field_type> },
         )
         .collect::<Vec<_>>();
 
@@ -102,7 +121,6 @@ pub fn derive(input: &Input) -> TokenStream {
         }
 
         #[allow(dead_code)]
-        #[allow(clippy::forget_non_drop)]
         impl #vec_name {
             /// Similar to [`
             #[doc = #vec_name_str]
@@ -124,10 +142,12 @@ pub fn derive(input: &Input) -> TokenStream {
             /// Similar to [`
             #[doc = #vec_name_str]
             /// ::capacity()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.capacity),
-            /// the capacity of all fields should be the same.
+            /// the minimum capacity across all fields. Compact columns have word-granular
+            /// capacity, so per-field capacities may differ; this returns the most
+            /// conservative (binding) value.
             pub fn capacity(&self) -> usize {
-                let capacity = self.#first_field.capacity();
-                #(debug_assert_eq!(self.#fields_names.capacity(), capacity);)*
+                let mut capacity = self.#first_field.capacity();
+                #(capacity = capacity.min(self.#fields_names.capacity());)*
                 capacity
             }
 
@@ -166,16 +186,12 @@ pub fn derive(input: &Input) -> TokenStream {
             /// Similar to [`
             #[doc = #vec_name_str]
             /// ::push()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.push).
-            #[allow(clippy::forget_non_drop)]
             pub fn push(&mut self, value: #name) {
-                // We need to use ptr read/write instead of moving out of the
-                // fields in case the value struct implements Drop.
+                // ManuallyDrop: fields are read out via ptr::read, so a mid-push unwind can't double-free them.
+                let mut value = ::core::mem::ManuallyDrop::new(value);
                 unsafe {
                     #(self.#fields_names.push(::core::ptr::read(&value.#fields_names));)*
                 }
-                // if value implements Drop, we don't want to run it here, only
-                // when the vec itself will be dropped.
-                ::core::mem::forget(value);
             }
 
             /// Similar to [`
@@ -213,38 +229,30 @@ pub fn derive(input: &Input) -> TokenStream {
             /// Similar to [`
             #[doc = #vec_name_str]
             /// ::insert()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.insert).
-            #[allow(clippy::forget_non_drop)]
             pub fn insert(&mut self, index: usize, element: #name) {
-                if ::branches::unlikely(index >= self.len()) {
-                    panic!("index out of bounds: the len is {} but the index is {}", self.len(), index);
+                if ::branches::unlikely(index > self.len()) {
+                    panic!("insertion index (is {}) should be <= len (is {})", index, self.len());
                 }
 
-                // similar to push, we can not use move and have to rely on ptr
-                // read/write
+                // ManuallyDrop: see `push` — a mid-insert unwind can't double-free read-out fields.
+                let mut element = ::core::mem::ManuallyDrop::new(element);
                 unsafe {
                     #(self.#fields_names.insert(index, ::core::ptr::read(&element.#fields_names));)*
                 }
-                // if value implements Drop, we don't want to run it here, only
-                // when the vec itself will be dropped.
-                ::core::mem::forget(element);
             }
 
             /// Similar to [`core::mem::replace()`](https://doc.rust-lang.org/std/mem/fn.replace.html).
-            #[allow(clippy::forget_non_drop)]
             pub fn replace(&mut self, index: usize, element: #name) -> #name {
                 if ::branches::unlikely(index >= self.len()) {
                     panic!("index out of bounds: the len is {} but the index is {}", self.len(), index);
                 }
 
-                // similar to push, we can not use move and have to rely on ptr
-                // read/write
+                // ManuallyDrop: see `push` — a mid-replace unwind can't double-free read-out fields.
+                let mut element = ::core::mem::ManuallyDrop::new(element);
                 #(
                     let field = unsafe { ::core::ptr::read(&element.#fields_names) };
                     let #fields_names_hygienic = #vec_replace;
                 )*
-                // if value implements Drop, we don't want to run it here, only
-                // when the vec itself will be dropped.
-                ::core::mem::forget(element);
 
                 #name{#(#fields_names: #fields_names_hygienic),*}
             }
@@ -462,7 +470,64 @@ pub fn derive(input: &Input) -> TokenStream {
                     #( #fields_names: #vec_from_raw_parts, )*
                 }
             }
+
+            /// Similar to [`
+            #[doc = #vec_name_str]
+            /// ::drain()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.drain).
+            pub fn drain<R: ::core::ops::RangeBounds<usize> + Clone>(&mut self, range: R) -> #drain_name<'_> {
+                #drain_name {
+                    #( #fields_names: self.#fields_names.drain(range.clone()), )*
+                }
+            }
         }
+
+        /// A draining iterator for
+        #[doc = #doc_url]
+        /// inside a
+        #[doc = #vec_name_str]
+        /// .
+        #[allow(missing_debug_implementations)]
+        #visibility struct #drain_name<'a> {
+            #(
+                /// drain of `
+                #[doc = stringify!(#fields_names)]
+                ///` from a
+                #[doc = #doc_url]
+                pub #fields_names: #drain_fields_types,
+            )*
+        }
+
+        #[allow(dead_code)]
+        impl<'a> Iterator for #drain_name<'a> {
+            type Item = #name;
+
+            #[inline]
+            fn next(&mut self) -> Option<#name> {
+                #(
+                    let #fields_names_hygienic = self.#fields_names.next()?;
+                )*
+                Some(#name{#(#fields_names: #fields_names_hygienic),*})
+            }
+
+            #[inline]
+            fn size_hint(&self) -> (usize, Option<usize>) {
+                self.#first_field.size_hint()
+            }
+        }
+
+        #[allow(dead_code)]
+        impl<'a> DoubleEndedIterator for #drain_name<'a> {
+            #[inline]
+            fn next_back(&mut self) -> Option<#name> {
+                #(
+                    let #fields_names_hygienic = self.#fields_names.next_back()?;
+                )*
+                Some(#name{#(#fields_names: #fields_names_hygienic),*})
+            }
+        }
+
+        #[allow(dead_code)]
+        impl<'a> ::core::iter::ExactSizeIterator for #drain_name<'a> {}
 
         #[allow(clippy::drop_non_drop)]
         impl Drop for #vec_name {
