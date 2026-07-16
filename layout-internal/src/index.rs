@@ -59,7 +59,7 @@ pub fn derive(input: &Input) -> TokenStream {
 
             #[inline]
             fn get(self, soa: &'a #vec_name) -> Option<Self::RefOutput> {
-                if ::branches::likely(self < soa.len()) {
+                if ::layout::branches::likely(self < soa.len()) {
                     Some(unsafe { ::layout::SoAIndex::get_unchecked(self, soa) })
                 } else {
                     None
@@ -82,7 +82,7 @@ pub fn derive(input: &Input) -> TokenStream {
 
             #[inline]
             fn get_mut(self, soa: &'a mut #vec_name) -> Option<Self::MutOutput> {
-                if ::branches::likely(self < soa.len()) {
+                if ::layout::branches::likely(self < soa.len()) {
                     Some(unsafe { ::layout::SoAIndexMut::get_unchecked_mut(self, soa) })
                 } else {
                     None

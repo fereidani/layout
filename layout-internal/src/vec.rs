@@ -230,7 +230,7 @@ pub fn derive(input: &Input) -> TokenStream {
             #[doc = #vec_name_str]
             /// ::insert()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.insert).
             pub fn insert(&mut self, index: usize, element: #name) {
-                if ::branches::unlikely(index > self.len()) {
+                if ::layout::branches::unlikely(index > self.len()) {
                     panic!("insertion index (is {}) should be <= len (is {})", index, self.len());
                 }
 
@@ -243,7 +243,7 @@ pub fn derive(input: &Input) -> TokenStream {
 
             /// Similar to [`core::mem::replace()`](https://doc.rust-lang.org/std/mem/fn.replace.html).
             pub fn replace(&mut self, index: usize, element: #name) -> #name {
-                if ::branches::unlikely(index >= self.len()) {
+                if ::layout::branches::unlikely(index >= self.len()) {
                     panic!("index out of bounds: the len is {} but the index is {}", self.len(), index);
                 }
 
@@ -271,7 +271,7 @@ pub fn derive(input: &Input) -> TokenStream {
             #[doc = #vec_name_str]
             /// ::pop()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.pop).
             pub fn pop(&mut self) -> Option<#name> {
-                if ::branches::unlikely(self.is_empty()) {
+                if ::layout::branches::unlikely(self.is_empty()) {
                     None
                 } else {
                     #(
