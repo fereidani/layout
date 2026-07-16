@@ -9,12 +9,12 @@ enum Kind {
     Blue,
 }
 
-/// Sparse discriminants (max 255) -> 8-bit storage.
+/// Custom (non-contiguous) discriminants within 4 bits (max 15) -> 4-bit storage.
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, CompactRepr)]
 enum Spaced {
     Low = 0,
-    High = 255,
+    High = 15,
 }
 
 #[derive(SOA)]
@@ -131,7 +131,9 @@ fn compact_enum_pop_remove_insert() {
 
 #[test]
 fn compact_enum_storage_width() {
-    // Sanity: the encoded widths are as designed (Kind=2 bits, Spaced=8 bits).
+    // Sanity: the encoded widths are as designed (Kind=2 bits, Spaced=4 bits).
+    // Enums needing >4 bits are rejected by `#[derive(CompactRepr)]` (8-bit
+    // compact is byte-for-byte a plain `Vec<Enum>` and thus redundant).
     assert_eq!(<Kind as CompactRepr>::BITS, 2);
-    assert_eq!(<Spaced as CompactRepr>::BITS, 8);
+    assert_eq!(<Spaced as CompactRepr>::BITS, 4);
 }

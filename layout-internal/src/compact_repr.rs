@@ -85,15 +85,25 @@ pub fn derive_compact_repr(input: &DeriveInput) -> TokenStream {
         0 | 1 => 1,
         2..=3 => 2,
         4..=15 => 4,
-        16..=255 => 8,
-        256..=65535 => 16,
-        _ => return err_span(
-            name.span(),
-            format!(
-                "#[derive(CompactRepr)]: largest discriminant ({max}) exceeds \
-                     the 16-bit (65535) compact storage limit"
-            ),
-        ),
+        _ => {
+            // Above 4 bits (16 values) `Compact` storage is byte-for-byte the
+            // same size as a plain `Vec<Enum>` with `#[repr(u8)]`/`#[repr(u16)]`,
+            // but it adds encode/decode + bit-op overhead on every access — the
+            // compaction buys nothing. Reject it and point the user at a plain
+            // field instead.
+            return err_span(
+                name.span(),
+                format!(
+                    "#[derive(CompactRepr)] on `{name}`: the largest discriminant is \
+                     {max}, which needs more than 4 bits. At 8 bits and above \
+                     `Compact<{name}>` is the same size as a plain `Vec<{name}>` \
+                     (use `#[repr(u8)]` or `#[repr(u16)]`) but adds encode/decode \
+                     overhead, so compacting it is redundant. Drop `Compact` and \
+                     store the field as a plain `{name}` (e.g. `flag: {name}` \
+                     instead of `flag: Compact<{name}>`)."
+                ),
+            );
+        }
     };
 
     let valid_values: Vec<usize> =
