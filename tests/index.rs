@@ -3,7 +3,8 @@
 mod particles;
 use self::particles::{Particle, ParticleRef, ParticleVec};
 
-/// Helper function to assert that two iterators (one of SoA and another of AoS) are equal.
+/// Helper function to assert that two iterators (one of SoA and another of AoS)
+/// are equal.
 fn eq_its<'a, I1, I2>(i1: I1, i2: I2)
 where
     I1: Iterator<Item = ParticleRef<'a>>,

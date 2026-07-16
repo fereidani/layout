@@ -103,6 +103,39 @@ fn insert() {
     assert_eq!(particles.index(2).name, "Na");
 }
 
+// Regression: `index == len` is valid append semantics for `Vec::insert`. The
+// old guard `index >= self.len()` rejected it (and made inserting into an empty
+// vec at index 0 impossible). Fixed to `index > self.len()`.
+#[test]
+fn insert_at_len_is_append() {
+    let mut particles = ParticleVec::new();
+    particles.push(Particle::new(String::from("Cl"), 0.0));
+    particles.push(Particle::new(String::from("Na"), 0.0));
+
+    particles.insert(2, Particle::new(String::from("Zn"), 0.0));
+    assert_eq!(particles.len(), 3);
+    assert_eq!(particles.index(0).name, "Cl");
+    assert_eq!(particles.index(1).name, "Na");
+    assert_eq!(particles.index(2).name, "Zn");
+}
+
+#[test]
+fn insert_into_empty_at_zero() {
+    let mut particles = ParticleVec::new();
+    particles.insert(0, Particle::new(String::from("Cl"), 0.0));
+    assert_eq!(particles.len(), 1);
+    assert_eq!(particles.index(0).name, "Cl");
+}
+
+#[test]
+#[should_panic(expected = "should be <= len")]
+fn insert_out_of_bounds_panics() {
+    let mut particles = ParticleVec::new();
+    particles.push(Particle::new(String::from("Cl"), 0.0));
+    // index > len is still out of bounds.
+    particles.insert(5, Particle::new(String::from("Zn"), 0.0));
+}
+
 #[test]
 fn pop() {
     let mut particles = ParticleVec::new();
@@ -207,5 +240,61 @@ fn drop_vec() {
 
     assert_eq!(counter.get(), 0);
     drop(vec);
+    assert_eq!(counter.get(), 5);
+}
+
+// Regression for the panic-safety (double-drop on unwind) fix: `push`, `insert`,
+// and `replace` consume their argument by bitwise-copying each field out via
+// `ptr::read` and then wrapping the value in `ManuallyDrop` instead of calling
+// `mem::forget`. This test verifies the HAPPY path still drops each user value
+// exactly once (no double-drop, no leak) across push/insert/replace/pop/drop.
+// (The unwind path itself is not testable here since Vec push only fails on
+// OOM, which aborts.)
+#[test]
+fn happy_path_drops_each_value_exactly_once() {
+    let counter = Rc::new(Cell::default());
+
+    // Helper to spawn a value tied to the shared drop counter.
+    let mk = || IncrOnDrop {
+        cell: counter.clone(),
+    };
+
+    let mut vec = IncrOnDropVec::new();
+
+    // 3 outstanding values after push.
+    vec.push(mk());
+    vec.push(mk());
+    vec.push(mk());
+    assert_eq!(counter.get(), 0, "push must not drop the consumed value");
+
+    // insert adds a 4th outstanding value (no drop).
+    vec.insert(1, mk());
+    assert_eq!(counter.get(), 0, "insert must not drop the consumed value");
+
+    // replace returns the OLD value (which we drop) and consumes the NEW one
+    // (kept in the vec) -> exactly one drop here for the displaced old value.
+    let old = vec.replace(0, mk());
+    assert_eq!(counter.get(), 0, "replace must not drop the consumed new value");
+    drop(old);
+    assert_eq!(counter.get(), 1, "replace returns the old value, dropping it once");
+
+    // 4 values still live in the vec. pop one out and drop it -> one more drop.
+    let popped = vec.pop();
+    assert!(popped.is_some());
+    assert_eq!(
+        counter.get(),
+        1,
+        "pop must move the value out without dropping it"
+    );
+    drop(popped);
+    assert_eq!(counter.get(), 2, "popped value drops exactly once");
+
+    // 3 values remain in the vec; dropping it must drop each exactly once.
+    drop(vec);
+    assert_eq!(counter.get(), 5, "dropping the vec drops each remaining value once");
+
+    // Final check: no value was double-dropped or leaked. The total number of
+    // drops (5) equals the total number of values created (5: 3 push + 1 insert
+    // + 1 replace-new), and every created value was accounted for.
     assert_eq!(counter.get(), 5);
 }

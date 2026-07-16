@@ -60,7 +60,8 @@ fn from_iter() {
         Particle::new(String::from("Zn"), 0.0),
     ];
 
-    let particles_from_iter: ParticleVec = vec_with_particles.into_iter().collect();
+    let particles_from_iter: ParticleVec =
+        vec_with_particles.into_iter().collect();
 
     let mut particles = ParticleVec::new();
     particles.push(Particle::new(String::from("Na"), 0.0));
@@ -78,7 +79,8 @@ fn extend() {
         Particle::new(String::from("Zn"), 0.0),
     ];
 
-    let particles_from_iter: ParticleVec = vec_with_particles.clone().into_iter().collect();
+    let particles_from_iter: ParticleVec =
+        vec_with_particles.clone().into_iter().collect();
 
     let mut particles = ParticleVec::new();
     Extend::<Particle>::extend(&mut particles, vec_with_particles);

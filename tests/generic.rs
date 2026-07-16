@@ -128,7 +128,9 @@ fn test_wrapped() {
     assert_eq!(this.view().len(), 3);
 }
 
-fn iter_max_generic<'a, T: SOA, V: SoASlice<T> + 'a>(vec: &'a V) -> Option<V::Ref<'a>>
+fn iter_max_generic<'a, T: SOA, V: SoASlice<T> + 'a>(
+    vec: &'a V,
+) -> Option<V::Ref<'a>>
 where
     V::Ref<'a>: PartialOrd + Debug,
 {
@@ -142,7 +144,9 @@ where
     x
 }
 
-fn iter_max_generic_iter<'a, T: SOA, V: SoAVec<T>>(it: V::Iter<'a>) -> Option<V::Ref<'a>>
+fn iter_max_generic_iter<'a, T: SOA, V: SoAVec<T>>(
+    it: V::Iter<'a>,
+) -> Option<V::Ref<'a>>
 where
     V::Ref<'a>: PartialOrd,
 {
