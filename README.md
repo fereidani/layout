@@ -345,4 +345,6 @@ struct. Run them yourself with `cargo bench`.
 Dual-licensed under MIT or Apache-2.0, at your option. Contributions are
 welcome; open an issue first to discuss the change.
 
+Thanks to Guillaume Fraux (@Luthaf) for [soa-derive](https://github.com/lumol-org/soa-derive), of which this crate is a hard fork.
+
 Thanks to @maikklein for the initial idea: https://maikklein.github.io/soa-rust/
