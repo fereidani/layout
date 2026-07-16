@@ -23,6 +23,10 @@ use core::ops::{Deref, DerefMut, RangeBounds};
 ///
 /// See the [module docs](self) for why length mutation is gated behind
 /// `unsafe`.
+///
+/// `repr(transparent)` makes the layout-identical-to-`Vec<T>` guarantee
+/// explicit: the wrapper adds no size, alignment, or field-offset overhead.
+#[repr(transparent)]
 pub struct Column<T> {
     inner: Vec<T>,
 }
