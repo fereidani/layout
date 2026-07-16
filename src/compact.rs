@@ -111,14 +111,17 @@ impl<T: CompactRepr> Compact<T> {
         CompactRefMut::from_value(&mut self.0)
     }
 
-    /// Returns a null pointer handle. Immutable access yields a value snapshot
-    /// with no backing storage, so there is no valid raw pointer to expose
-    /// (consistent with the owned-to-`Ref` conversion path).
+    /// Returns a snapshot pointer carrying this value inline. Immutable
+    /// access yields a value snapshot with no backing storage, so there is no
+    /// raw address to expose; carrying the value keeps the pointer non-null
+    /// and recoverable via `as_ref`/`read`, so an element pointer derived
+    /// from a `Ref` is never misclassified as null.
     #[inline(always)]
     pub fn as_ptr(&self) -> CompactPtr<T> {
         CompactPtr {
             packed: core::ptr::null(),
             index: 0,
+            value: Some(self.0),
         }
     }
 }
@@ -132,14 +135,21 @@ impl<T: CompactRepr> From<T> for Compact<T> {
 
 #[cfg(feature = "serde")]
 impl<T: CompactRepr + serde::Serialize> serde::Serialize for Compact<T> {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
         self.0.serialize(serializer)
     }
 }
 
 #[cfg(feature = "serde")]
-impl<'de, T: CompactRepr + serde::Deserialize<'de>> serde::Deserialize<'de> for Compact<T> {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+impl<'de, T: CompactRepr + serde::Deserialize<'de>> serde::Deserialize<'de>
+    for Compact<T>
+{
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Self, D::Error> {
         T::deserialize(deserializer).map(Compact)
     }
 }
@@ -241,9 +251,20 @@ impl<'a, T: CompactRepr> CompactRefMut<'a, T> {
     }
 
     pub fn as_ptr(&self) -> CompactPtr<T> {
-        CompactPtr {
-            packed: self.packed as *const Store<T>,
-            index: self.index,
+        if self.packed.is_null() {
+            // Direct/owned mode: no backing storage to point into, so carry
+            // a snapshot of the current value instead of going null.
+            CompactPtr {
+                packed: core::ptr::null(),
+                index: 0,
+                value: Some(self.get()),
+            }
+        } else {
+            CompactPtr {
+                packed: self.packed as *const Store<T>,
+                index: self.index,
+                value: None,
+            }
         }
     }
 
@@ -273,7 +294,9 @@ impl<'a, T: CompactRepr + PartialEq> PartialEq for CompactRefMut<'a, T> {
 
 impl<'a, T: CompactRepr + Eq> Eq for CompactRefMut<'a, T> {}
 
-impl<'a, T: CompactRepr + core::hash::Hash> core::hash::Hash for CompactRefMut<'a, T> {
+impl<'a, T: CompactRepr + core::hash::Hash> core::hash::Hash
+    for CompactRefMut<'a, T>
+{
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         self.get().hash(state);
     }
@@ -333,7 +356,9 @@ impl<T: CompactRepr> Default for CompactVec<T> {
 impl<T: CompactRepr + core::fmt::Debug> core::fmt::Debug for CompactVec<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_list()
-            .entries((0..self.len()).map(|i| Compact(T::decode(self.inner.get(i)))))
+            .entries(
+                (0..self.len()).map(|i| Compact(T::decode(self.inner.get(i)))),
+            )
             .finish()
     }
 }
@@ -349,8 +374,9 @@ impl<T: CompactRepr> Clone for CompactVec<T> {
 impl<T: CompactRepr + PartialEq> PartialEq for CompactVec<T> {
     fn eq(&self, other: &Self) -> bool {
         self.len() == other.len()
-            && (0..self.len())
-                .all(|i| T::decode(self.inner.get(i)) == T::decode(other.inner.get(i)))
+            && (0..self.len()).all(|i| {
+                T::decode(self.inner.get(i)) == T::decode(other.inner.get(i))
+            })
     }
 }
 
@@ -542,7 +568,12 @@ impl<T: CompactRepr> CompactVec<T> {
     }
 
     pub fn split_off(&mut self, at: usize) -> CompactVec<T> {
-        assert!(at <= self.len(), "the len is {} but the index is {}", self.len(), at);
+        assert!(
+            at <= self.len(),
+            "the len is {} but the index is {}",
+            self.len(),
+            at
+        );
         let mut other = Store::<T>::with_capacity(self.len() - at);
         for i in at..self.inner.len() {
             other.push(self.inner.get(i));
@@ -598,7 +629,8 @@ impl<T: CompactRepr> CompactVec<T> {
         }
     }
 
-    /// Iterate by mutable handle over the column (analogous to `Vec::iter_mut`).
+    /// Iterate by mutable handle over the column (analogous to
+    /// `Vec::iter_mut`).
     #[inline]
     pub fn iter_mut(&mut self) -> CompactIterMut<'_, T> {
         CompactIterMut {
@@ -657,6 +689,7 @@ impl<T: CompactRepr> CompactVec<T> {
         CompactPtr {
             packed: &self.inner as *const Store<T>,
             index: 0,
+            value: None,
         }
     }
 
@@ -667,8 +700,8 @@ impl<T: CompactRepr> CompactVec<T> {
         }
     }
 
-    /// Reconstruct a [`CompactVec`] from the raw packed-storage pointer obtained
-    /// from [`CompactVec::as_mut_ptr`].
+    /// Reconstruct a [`CompactVec`] from the raw packed-storage pointer
+    /// obtained from [`CompactVec::as_mut_ptr`].
     ///
     /// Unlike `Vec::from_raw_parts`, no `len`/`capacity` are required: the
     /// [`PackedArray`](crate::bitpack::PackedArray) (`data.packed`) carries its
@@ -678,14 +711,15 @@ impl<T: CompactRepr> CompactVec<T> {
     /// `data` must originate from [`CompactVec::as_mut_ptr`], the source
     /// [`CompactVec`] must have been forgotten (e.g. via [`core::mem::forget`])
     /// and its storage not reused or freed since, and `data.packed` must still
-    /// point to valid, properly aligned `Store<T>` storage. This constructor moves
-    /// that storage out of the (forgotten) source, so the source must never be
-    /// used or dropped again.
+    /// point to valid, properly aligned `Store<T>` storage. This constructor
+    /// moves that storage out of the (forgotten) source, so the source must
+    /// never be used or dropped again.
     pub unsafe fn from_raw_parts(data: CompactPtrMut<T>) -> CompactVec<T> {
         CompactVec {
-            // SAFETY: `data.packed` points to a live, owned, inline `PackedArray`
-            // that the caller has given up (forgotten the source). We move it out
-            // by value; the source must not be dropped again.
+            // SAFETY: `data.packed` points to a live, owned, inline
+            // `PackedArray` that the caller has given up (forgotten
+            // the source). We move it out by value; the source must
+            // not be dropped again.
             inner: unsafe { core::ptr::read(data.packed) },
         }
     }
@@ -800,7 +834,10 @@ impl<'a, T: CompactRepr> IntoIterator for &'a mut CompactVec<T> {
 
 #[cfg(feature = "serde")]
 impl<T: CompactRepr + serde::Serialize> serde::Serialize for CompactVec<T> {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeSeq;
         let mut seq = serializer.serialize_seq(Some(self.len()))?;
         for val in self.iter() {
@@ -811,19 +848,31 @@ impl<T: CompactRepr + serde::Serialize> serde::Serialize for CompactVec<T> {
 }
 
 #[cfg(feature = "serde")]
-impl<'de, T: CompactRepr + serde::Deserialize<'de>> serde::Deserialize<'de> for CompactVec<T> {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+impl<'de, T: CompactRepr + serde::Deserialize<'de>> serde::Deserialize<'de>
+    for CompactVec<T>
+{
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Self, D::Error> {
         use core::fmt;
+
         use serde::de::{SeqAccess, Visitor};
 
         struct CompactVecVisitor<T: CompactRepr>(PhantomData<T>);
-        impl<'de, T: CompactRepr + serde::Deserialize<'de>> Visitor<'de> for CompactVecVisitor<T> {
+        impl<'de, T: CompactRepr + serde::Deserialize<'de>> Visitor<'de>
+            for CompactVecVisitor<T>
+        {
             type Value = CompactVec<T>;
             fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
                 f.write_str("a sequence of compact values")
             }
-            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-                let mut v = CompactVec::<T>::with_capacity(seq.size_hint().unwrap_or(0));
+            fn visit_seq<A: SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut v = CompactVec::<T>::with_capacity(
+                    seq.size_hint().unwrap_or(0),
+                );
                 while let Some(elem) = seq.next_element::<T>()? {
                     v.push(Compact(elem));
                 }
@@ -1013,6 +1062,7 @@ impl<'a, T: CompactRepr> CompactSlice<'a, T> {
         CompactPtr {
             packed: self.packed as *const Store<T>,
             index: self.start,
+            value: None,
         }
     }
 
@@ -1113,7 +1163,9 @@ impl<'a, T: CompactRepr> IntoIterator for CompactSlice<'a, T> {
     }
 }
 
-impl<T: CompactRepr + core::fmt::Debug> core::fmt::Debug for CompactSlice<'_, T> {
+impl<T: CompactRepr + core::fmt::Debug> core::fmt::Debug
+    for CompactSlice<'_, T>
+{
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_list().entries(self.iter()).finish()
     }
@@ -1127,7 +1179,9 @@ impl<'a, T: CompactRepr + PartialEq> PartialEq for CompactSlice<'a, T> {
 
 impl<'a, T: CompactRepr + Eq> Eq for CompactSlice<'a, T> {}
 
-impl<'a, T: CompactRepr + core::hash::Hash> core::hash::Hash for CompactSlice<'a, T> {
+impl<'a, T: CompactRepr + core::hash::Hash> core::hash::Hash
+    for CompactSlice<'a, T>
+{
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         self.len.hash(state);
         for val in self.iter() {
@@ -1383,6 +1437,7 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
         CompactPtr {
             packed: self.packed as *const Store<T>,
             index: self.start,
+            value: None,
         }
     }
 
@@ -1548,7 +1603,9 @@ impl<'a, T: CompactRepr> IntoIterator for CompactSliceMut<'a, T> {
     }
 }
 
-impl<T: CompactRepr + core::fmt::Debug> core::fmt::Debug for CompactSliceMut<'_, T> {
+impl<T: CompactRepr + core::fmt::Debug> core::fmt::Debug
+    for CompactSliceMut<'_, T>
+{
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_list().entries(self.iter()).finish()
     }
@@ -1562,7 +1619,9 @@ impl<'a, T: CompactRepr + PartialEq> PartialEq for CompactSliceMut<'a, T> {
 
 impl<'a, T: CompactRepr + Eq> Eq for CompactSliceMut<'a, T> {}
 
-impl<'a, T: CompactRepr + core::hash::Hash> core::hash::Hash for CompactSliceMut<'a, T> {
+impl<'a, T: CompactRepr + core::hash::Hash> core::hash::Hash
+    for CompactSliceMut<'a, T>
+{
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         self.len.hash(state);
         for val in self.iter() {
@@ -1572,13 +1631,20 @@ impl<'a, T: CompactRepr + core::hash::Hash> core::hash::Hash for CompactSliceMut
 }
 
 // ---------------------------------------------------------------------------
-// CompactPtr / CompactPtrMut (packed-mode only; null in direct/owned mode)
+// CompactPtr / CompactPtrMut. A CompactPtr is either storage-backed (packed +
+// index into a live column) or a value snapshot (derived from an owned
+// `Compact<T>`, which has no backing storage to point into). Snapshot
+// pointers are not null: they identify a real element and `as_ref`/`read`
+// recover its value. CompactPtrMut has no snapshot mode — writes through a
+// snapshot could not be observed anywhere, so the direct/owned mutable path
+// still yields a null pointer.
 // ---------------------------------------------------------------------------
 
 #[derive(Copy, Clone)]
 pub struct CompactPtr<T: CompactRepr> {
     packed: *const Store<T>,
     index: usize,
+    value: Option<T>,
 }
 
 #[derive(Copy, Clone)]
@@ -1595,13 +1661,16 @@ impl<T: CompactRepr> core::fmt::Debug for CompactPtr<T> {
         f.debug_struct("CompactPtr")
             .field("packed", &self.packed)
             .field("index", &self.index)
+            .field("value", &self.value.map(T::encode))
             .finish()
     }
 }
 
 impl<T: CompactRepr> PartialEq for CompactPtr<T> {
     fn eq(&self, other: &Self) -> bool {
-        self.packed == other.packed && self.index == other.index
+        self.packed == other.packed
+            && self.index == other.index
+            && self.value.map(T::encode) == other.value.map(T::encode)
     }
 }
 
@@ -1611,6 +1680,7 @@ impl<T: CompactRepr> core::hash::Hash for CompactPtr<T> {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         self.packed.hash(state);
         self.index.hash(state);
+        self.value.map(T::encode).hash(state);
     }
 }
 
@@ -1641,25 +1711,30 @@ impl<T: CompactRepr> core::hash::Hash for CompactPtrMut<T> {
 #[allow(dead_code)]
 impl<T: CompactRepr> CompactPtr<T> {
     pub fn is_null(self) -> bool {
-        self.packed.is_null()
+        self.packed.is_null() && self.value.is_none()
     }
 
     /// Returns the element the pointer references, or `None` if it is null.
     ///
     /// # Safety
     ///
-    /// If non-null, `self.packed` must point to valid `Store<T>` storage and
-    /// `self.index` must address an initialized element within it. The caller
-    /// must ensure the backing storage remains live while the returned value
-    /// is used.
+    /// If storage-backed and non-null, `self.packed` must point to valid
+    /// `Store<T>` storage and `self.index` must address an initialized
+    /// element within it. The caller must ensure the backing storage remains
+    /// live while the returned value is used. Snapshot pointers dereference
+    /// nothing and simply return the carried value.
     pub unsafe fn as_ref(self) -> Option<Compact<T>> {
-        if self.is_null() {
+        if let Some(value) = self.value {
+            Some(Compact(value))
+        } else if self.packed.is_null() {
             None
         } else {
             Some(Compact(T::decode((*self.packed).get(self.index))))
         }
     }
 
+    /// Snapshot pointers convert to a null mutable pointer: there is no
+    /// backing storage a write could be observed in.
     pub fn as_mut_ptr(&self) -> CompactPtrMut<T> {
         CompactPtrMut {
             packed: self.packed as *mut Store<T>,
@@ -1678,6 +1753,7 @@ impl<T: CompactRepr> CompactPtr<T> {
         CompactPtr {
             packed: self.packed,
             index: (self.index as isize + count) as usize,
+            value: self.value,
         }
     }
 
@@ -1685,6 +1761,7 @@ impl<T: CompactRepr> CompactPtr<T> {
         CompactPtr {
             packed: self.packed,
             index: self.index.wrapping_add(count as usize),
+            value: self.value,
         }
     }
 
@@ -1699,6 +1776,7 @@ impl<T: CompactRepr> CompactPtr<T> {
         CompactPtr {
             packed: self.packed,
             index: self.index + count,
+            value: self.value,
         }
     }
 
@@ -1713,6 +1791,7 @@ impl<T: CompactRepr> CompactPtr<T> {
         CompactPtr {
             packed: self.packed,
             index: self.index - count,
+            value: self.value,
         }
     }
 
@@ -1720,6 +1799,7 @@ impl<T: CompactRepr> CompactPtr<T> {
         CompactPtr {
             packed: self.packed,
             index: self.index.wrapping_add(count),
+            value: self.value,
         }
     }
 
@@ -1727,6 +1807,7 @@ impl<T: CompactRepr> CompactPtr<T> {
         CompactPtr {
             packed: self.packed,
             index: self.index.wrapping_sub(count),
+            value: self.value,
         }
     }
 
@@ -1735,10 +1816,16 @@ impl<T: CompactRepr> CompactPtr<T> {
     ///
     /// # Safety
     ///
-    /// `self.packed` must point to valid `Store<T>` storage and `self.index`
-    /// must address an initialized element within it.
+    /// For storage-backed pointers, `self.packed` must point to valid
+    /// `Store<T>` storage and `self.index` must address an initialized
+    /// element within it. Snapshot pointers dereference nothing and simply
+    /// return the carried value.
     pub unsafe fn read(self) -> Compact<T> {
-        Compact(T::decode((*self.packed).get(self.index)))
+        if let Some(value) = self.value {
+            Compact(value)
+        } else {
+            Compact(T::decode((*self.packed).get(self.index)))
+        }
     }
 
     /// Reads the element the pointer references (analogous to
@@ -1803,6 +1890,7 @@ impl<T: CompactRepr> CompactPtrMut<T> {
         CompactPtr {
             packed: self.packed,
             index: self.index,
+            value: None,
         }
     }
 
