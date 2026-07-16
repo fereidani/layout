@@ -730,6 +730,13 @@ impl<T: CompactRepr> CompactVec<T> {
             core::ops::Bound::Excluded(&i) => i,
             core::ops::Bound::Unbounded => self.inner.len(),
         };
+        assert!(
+            start <= end && end <= self.inner.len(),
+            "splice range out of bounds: the len is {} but the range is {}..{}",
+            self.inner.len(),
+            start,
+            end
+        );
         let mut removed = Vec::new();
         for i in start..end {
             removed.push(Compact(T::decode(self.inner.get(i))));

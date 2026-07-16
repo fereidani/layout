@@ -5,7 +5,7 @@
 //! `SliceMut::index_mut` dispatch through, plus range-based slicing and drain.
 //! Run with `cargo test --release --test compact_index_bounds` to exercise the
 //! release-only path.
-use layout::{Compact, CompactBool, SOA};
+use layout::{Compact, CompactBool, CompactVec, SOA};
 
 #[derive(Clone, SOA)]
 struct Row {
@@ -84,4 +84,17 @@ fn slice_mut_oob_range_panics() {
 fn drain_oob_range_panics() {
     let mut v = one();
     let _ = v.flag.drain(0..5);
+}
+
+// `CompactVec::splice` must reject an out-of-bounds range up front, the way
+// `drain` does. Without an explicit check it instead reads stale packed lanes
+// and panics deep in the shift arithmetic (an `index out of bounds` /
+// `subtract with overflow` from the low-level word ops), not with a clean
+// range-validation message.
+#[test]
+#[should_panic(expected = "splice range out of bounds")]
+fn compactvec_splice_oob_range_is_rejected() {
+    let mut v = CompactVec::<bool>::new();
+    v.push(Compact(true)); // len == 1
+    let _: Vec<Compact<bool>> = v.splice(0..5, core::iter::empty::<Compact<bool>>());
 }
