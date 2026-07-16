@@ -4,18 +4,22 @@
 //! packed into a sequence of `usize` "words", so that each element occupies
 //! exactly `BITS` bits. It is the backing store used by [`crate::Compact`]
 //! (1 bit per element for `Compact<bool>`) and by compact enum columns
-//! (2 / 4 / 8 / 16 bits per element).
+//! (2 / 4 bits per element).
 //!
-//! Only widths that divide `usize::BITS` evenly are supported (`1`, `2`, `4`,
-//! `8` and `16`). This guarantees that no element ever straddles a word
-//! boundary, so reading or writing a single element touches exactly one word.
+//! Only `1`, `2` and `4` are supported. Each divides `usize::BITS` evenly,
+//! so no element ever straddles a word boundary and reading or writing a
+//! single element touches exactly one word. Wider widths are rejected: at 8
+//! bits and above a packed column is byte-identical to a plain column but
+//! adds encode/decode overhead, so compaction buys nothing (the
+//! [`CompactRepr`](crate::CompactRepr) derive caps at 4 bits for the same
+//! reason).
 
 use alloc::vec::Vec;
 
 /// A growable array packing `BITS`-wide unsigned values into `usize` words.
 ///
-/// Valid widths are `1`, `2`, `4`, `8` and `16` (each divides `usize::BITS`
-/// evenly). Values are truncated to `BITS` bits on insertion.
+/// Valid widths are `1`, `2` and `4` (each divides `usize::BITS` evenly).
+/// Values are truncated to `BITS` bits on insertion.
 ///
 /// Any other width is rejected at build time:
 ///
@@ -47,8 +51,8 @@ impl<const BITS: u32> PackedArray<BITS> {
     /// Bit mask covering the low `BITS` bits of a word.
     #[inline(always)]
     fn mask() -> usize {
-        // `WIDTH_OK` guarantees BITS is one of {1, 2, 4, 8, 16}, all strictly
-        // less than usize::BITS, so `1 << BITS` never overflows.
+        // `WIDTH_OK` guarantees BITS is one of {1, 2, 4}, all strictly less
+        // than usize::BITS, so `1 << BITS` never overflows.
         (1usize << BITS) - 1
     }
 
@@ -79,8 +83,8 @@ impl<const BITS: u32> PackedArray<BITS> {
     /// mask shift and silently truncating every value (`BITS = usize::BITS`)
     /// in release.
     const WIDTH_OK: () = assert!(
-        BITS == 1 || BITS == 2 || BITS == 4 || BITS == 8 || BITS == 16,
-        "PackedArray BITS must be 1, 2, 4, 8 or 16"
+        BITS == 1 || BITS == 2 || BITS == 4,
+        "PackedArray BITS must be 1, 2 or 4"
     );
 
     /// Create an empty array.
@@ -215,9 +219,26 @@ impl<const BITS: u32> PackedArray<BITS> {
     /// empty.
     pub fn append(&mut self, other: &mut Self) {
         let other_len = other.len;
+        if other_len == 0 {
+            return;
+        }
+        let per = Self::items_per_word();
         self.reserve(other_len);
-        for i in 0..other_len {
-            self.push(other.get(i));
+        if self.len % per == 0 {
+            // Word-aligned tail: both stores pack lanes at identical bit
+            // offsets within each word, so `other`'s packed words copy in
+            // verbatim. `other.words.len() == words_for(other_len)` by
+            // invariant, and any stale bits beyond `other_len` land beyond
+            // `self`'s new length, so they stay invisible. No per-element
+            // `push`, so advance the length explicitly.
+            self.words.extend_from_slice(&other.words);
+            self.len += other_len;
+        } else {
+            // Unaligned tail: merge element by element into the partial word;
+            // `push` advances the length itself.
+            for i in 0..other_len {
+                self.push(other.get(i));
+            }
         }
         other.clear();
     }
@@ -268,12 +289,13 @@ fn count_word_in<const BITS: u32>(word: usize, value: usize) -> usize {
             word.count_zeros() as usize
         }
     } else {
-        // SWAR lane-equality count (auto-vectorizes in `count_in`). Borrow-based
-        // zero detectors (`(v - 0x01..) & !v & 0x80..`) are unsafe here: a
-        // borrow out of a zero lane corrupts a small-valued neighbour's
-        // indicator. Instead: XOR with the replicated target, collapse each lane
-        // to one indicator bit, move it to the lane's high bit, invert and mask
-        // to one bit per matching lane, then `count_ones`. `rep1` = usize::MAX
+        // SWAR lane-equality count (auto-vectorizes in `count_in`).
+        // Borrow-based zero detectors (`(v - 0x01..) & !v & 0x80..`)
+        // are unsafe here: a borrow out of a zero lane corrupts a
+        // small-valued neighbour's indicator. Instead: XOR with the
+        // replicated target, collapse each lane to one indicator bit,
+        // move it to the lane's high bit, invert and mask to one bit
+        // per matching lane, then `count_ones`. `rep1` = usize::MAX
         // / mask gives a 1 in bit 0 of every lane. Covered by the
         // `count_word_in_*` tests below.
         let mask = (1usize << BITS) - 1;
@@ -470,25 +492,6 @@ mod tests {
     }
 
     #[test]
-    fn eight_and_sixteen_bit() {
-        let mut a8 = PackedArray::<8>::new();
-        for v in 0u16..300 {
-            a8.push((v & 0xFF) as usize);
-        }
-        for i in 0..a8.len() {
-            assert_eq!(a8.get(i), i & 0xFF);
-        }
-
-        let mut a16 = PackedArray::<16>::new();
-        for v in 0u32..70_000 {
-            a16.push((v & 0xFFFF) as usize);
-        }
-        for i in 0..a16.len() {
-            assert_eq!(a16.get(i), i & 0xFFFF);
-        }
-    }
-
-    #[test]
     fn truncate_then_push_clears_stale_bits() {
         // Regression: truncate must not leave stale bits that a subsequent
         // push(0) into a partially-filled word would OR against.
@@ -546,10 +549,10 @@ mod tests {
 
     #[test]
     fn capacity_grows() {
-        let mut a = PackedArray::<8>::with_capacity(4);
+        let mut a = PackedArray::<4>::with_capacity(4);
         assert!(a.capacity() >= 4);
         for i in 0..200 {
-            a.push(i & 0xFF);
+            a.push(i & 0xF);
         }
         assert!(a.capacity() >= 200);
         a.shrink_to_fit();
@@ -632,8 +635,9 @@ mod tests {
         let targets = target_values(b);
         let mut tested = 0u64;
 
-        // --- Exhaustive enumeration of the first 4 lanes (rest 0 and rest all-ones),
-        //     for every target. Only affordable for b in {2, 4}. ---
+        // --- Exhaustive enumeration of the first 4 lanes (rest 0 and rest
+        // all-ones),     for every target. Only affordable for b in {2,
+        // 4}. ---
         if b == 2 || b == 4 {
             let span = nvals;
             // Enumerate first 4 lanes fully.
@@ -642,11 +646,16 @@ mod tests {
                     for l2 in 0..span {
                         for l3 in 0..span {
                             for &fill in &[0u64, nvals - 1] {
-                                let word = build_word(b, &[l0, l1, l2, l3], fill);
+                                let word =
+                                    build_word(b, &[l0, l1, l2, l3], fill);
                                 for &t in &targets {
                                     let got = count_word_in_word(b, word, t);
                                     let exp = oracle_dyn(b, word, t);
-                                    assert_eq!(got, exp, "exhaust b={} t={} word={:#x}", b, t, word);
+                                    assert_eq!(
+                                        got, exp,
+                                        "exhaust b={} t={} word={:#x}",
+                                        b, t, word
+                                    );
                                     tested += 1;
                                 }
                             }
@@ -667,7 +676,8 @@ mod tests {
         } else {
             vec![0, 1, lane_mask, (nvals / 2) as usize]
         };
-        let mut state = 0x9E37_79B9_7F4A_7C15u64.wrapping_add((b as u64).wrapping_mul(2654435761));
+        let mut state = 0x9E37_79B9_7F4A_7C15u64
+            .wrapping_add((b as u64).wrapping_mul(2654435761));
         for _ in 0..n {
             let word = lcg_next(&mut state) as usize;
             for &t in &fuzz_targets {
@@ -697,7 +707,8 @@ mod tests {
             tested += 1;
         }
         // single matching lane at each position; alternating match/no-match;
-        // adjacent (zero-then-small) lane patterns that stress borrow detectors.
+        // adjacent (zero-then-small) lane patterns that stress borrow
+        // detectors.
         for pos in 0..per {
             // single lane == target (target 0), rest = (mask/2)
             let fill = nvals / 2;
@@ -707,7 +718,11 @@ mod tests {
             for &t in &[0usize, 1, lane_mask, (nvals / 2) as usize] {
                 let got = count_word_in_word(b, word, t);
                 let exp = oracle_dyn(b, word, t);
-                assert_eq!(got, exp, "single b={} pos={} t={} word={:#x}", b, pos, t, word);
+                assert_eq!(
+                    got, exp,
+                    "single b={} pos={} t={} word={:#x}",
+                    b, pos, t, word
+                );
                 tested += 1;
             }
             // adjacent zero-then-small (and small-then-zero) at (pos, pos+1)
@@ -719,7 +734,10 @@ mod tests {
                     let mut lanes_b = vec![fill; per];
                     lanes_b[pos] = small;
                     lanes_b[pos + 1] = 0;
-                    for &word in &[build_word(b, &lanes_a, fill), build_word(b, &lanes_b, fill)] {
+                    for &word in &[
+                        build_word(b, &lanes_a, fill),
+                        build_word(b, &lanes_b, fill),
+                    ] {
                         for &t in &[0usize, 1, small as usize, lane_mask] {
                             let got = count_word_in_word(b, word, t);
                             let exp = oracle_dyn(b, word, t);
@@ -760,8 +778,6 @@ mod tests {
         match b {
             2 => count_word_in::<2>(word, value),
             4 => count_word_in::<4>(word, value),
-            8 => count_word_in::<8>(word, value),
-            16 => count_word_in::<16>(word, value),
             _ => unreachable!("unsupported width {}", b),
         }
     }
@@ -770,8 +786,6 @@ mod tests {
         match b {
             2 => oracle::<2>(word, value),
             4 => oracle::<4>(word, value),
-            8 => oracle::<8>(word, value),
-            16 => oracle::<16>(word, value),
             _ => unreachable!("unsupported width {}", b),
         }
     }
@@ -785,15 +799,5 @@ mod tests {
     #[test]
     fn count_word_in_gate_4() {
         gate_width(4);
-    }
-    #[cfg(not(miri))]
-    #[test]
-    fn count_word_in_gate_8() {
-        gate_width(8);
-    }
-    #[cfg(not(miri))]
-    #[test]
-    fn count_word_in_gate_16() {
-        gate_width(16);
     }
 }

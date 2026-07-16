@@ -104,7 +104,7 @@ dereferences where a method reads or writes a field by value:
 
 A `bool` column costs a byte per row. A small enum costs four or eight.
 `Compact<T>` shrinks narrow columns to the minimum width: `bool` and one-bit
-enums take one bit, larger fieldless enums take 2, 4, 8, or 16.
+enums take one bit, larger fieldless enums take 2 or 4.
 
 ```rust
 use layout::{Compact, CompactRepr, SOA};

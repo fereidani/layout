@@ -29,9 +29,13 @@ pub fn derive(input: &Input) -> TokenStream {
 
     let ptr_fields_types = input
         .map_fields_nested_or(
-            |_, field_type, compact| if let Some(inner) = compact { names::ptr_name_compact(inner) } else {
-                let id = names::ptr_name(field_type);
-                quote! { #id }
+            |_, field_type, compact| {
+                if let Some(inner) = compact {
+                    names::ptr_name_compact(inner)
+                } else {
+                    let id = names::ptr_name(field_type);
+                    quote! { #id }
+                }
             },
             |_, field_type| quote! { *const #field_type },
         )
@@ -39,9 +43,13 @@ pub fn derive(input: &Input) -> TokenStream {
 
     let ptr_mut_fields_types = input
         .map_fields_nested_or(
-            |_, field_type, compact| if let Some(inner) = compact { names::ptr_mut_name_compact(inner) } else {
-                let id = names::ptr_mut_name(field_type);
-                quote! { #id }
+            |_, field_type, compact| {
+                if let Some(inner) = compact {
+                    names::ptr_mut_name_compact(inner)
+                } else {
+                    let id = names::ptr_mut_name(field_type);
+                    quote! { #id }
+                }
             },
             |_, field_type| quote! { *mut #field_type },
         )
@@ -144,13 +152,6 @@ pub fn derive(input: &Input) -> TokenStream {
                 }
             }
 
-            /// Similar to [`*const T::offset()`](https://doc.rust-lang.org/std/primitive.pointer.html#method.offset).
-            pub fn wrapping_offset(self, count: isize) -> #ptr_name {
-                #ptr_name {
-                    #(#fields_names: self.#fields_names.wrapping_offset(count), )*
-                }
-            }
-
             /// Similar to [`*const T::add()`](https://doc.rust-lang.org/std/primitive.pointer.html#method.add),
             /// with the same safety caveats.
             pub unsafe fn add(self, count: usize) -> #ptr_name {
@@ -167,41 +168,11 @@ pub fn derive(input: &Input) -> TokenStream {
                 }
             }
 
-            /// Similar to [`*const T::wrapping_add()`](https://doc.rust-lang.org/std/primitive.pointer.html#method.wrapping_add).
-            pub fn wrapping_add(self, count: usize) -> #ptr_name {
-                #ptr_name {
-                    #(#fields_names: self.#fields_names.wrapping_add(count), )*
-                }
-            }
-
-            /// Similar to [`*const T::wrapping_sub()`](https://doc.rust-lang.org/std/primitive.pointer.html#method.wrapping_sub).
-            pub fn wrapping_sub(self, count: usize) -> #ptr_name {
-                #ptr_name {
-                    #(#fields_names: self.#fields_names.wrapping_sub(count), )*
-                }
-            }
-
             /// Similar to [`*const T::read()`](https://doc.rust-lang.org/std/primitive.pointer.html#method.read),
             /// with the same safety caveats.
             pub unsafe fn read(self) -> #name {
                 #name {
                     #(#fields_names: self.#fields_names.read(), )*
-                }
-            }
-
-            /// Similar to [`*const T::read_volatile()`](https://doc.rust-lang.org/std/primitive.pointer.html#method.read_volatile),
-            /// with the same safety caveats.
-            pub unsafe fn read_volatile(self) -> #name {
-                #name {
-                    #(#fields_names: self.#fields_names.read_volatile(), )*
-                }
-            }
-
-            /// Similar to [`*const T::read_unaligned()`](https://doc.rust-lang.org/std/primitive.pointer.html#method.read_unaligned),
-            /// with the same safety caveats.
-            pub unsafe fn read_unaligned(self) -> #name {
-                #name {
-                    #(#fields_names: self.#fields_names.read_unaligned(), )*
                 }
             }
         }
@@ -262,13 +233,6 @@ pub fn derive(input: &Input) -> TokenStream {
                 }
             }
 
-            /// Similar to [`*mut T::wrapping_offset()`](https://doc.rust-lang.org/std/primitive.pointer.html#method.wrapping_offset)
-            pub fn wrapping_offset(self, count: isize) -> #ptr_mut_name {
-                #ptr_mut_name {
-                    #(#fields_names: self.#fields_names.wrapping_offset(count), )*
-                }
-            }
-
             /// Similar to [`*mut T::add()`](https://doc.rust-lang.org/std/primitive.pointer.html#method.add),
             /// with the same safety caveats.
             pub unsafe fn add(self, count: usize) -> #ptr_mut_name {
@@ -285,43 +249,11 @@ pub fn derive(input: &Input) -> TokenStream {
                 }
             }
 
-            /// Similar to [`*mut T::wrapping_add()`](https://doc.rust-lang.org/std/primitive.pointer.html#method.wrapping_add),
-            /// with the same safety caveats.
-            pub fn wrapping_add(self, count: usize) -> #ptr_mut_name {
-                #ptr_mut_name {
-                    #(#fields_names: self.#fields_names.wrapping_add(count), )*
-                }
-            }
-
-            /// Similar to [`*mut T::wrapping_sub()`](https://doc.rust-lang.org/std/primitive.pointer.html#method.wrapping_sub),
-            /// with the same safety caveats.
-            pub fn wrapping_sub(self, count: usize) -> #ptr_mut_name {
-                #ptr_mut_name {
-                    #(#fields_names: self.#fields_names.wrapping_sub(count), )*
-                }
-            }
-
             /// Similar to [`*mut T::read()`](https://doc.rust-lang.org/std/primitive.pointer.html#method.read),
             /// with the same safety caveats.
             pub unsafe fn read(self) -> #name {
                 #name {
                     #(#fields_names: self.#fields_names.read(), )*
-                }
-            }
-
-            /// Similar to [`*mut T::read_volatile()`](https://doc.rust-lang.org/std/primitive.pointer.html#method.read_volatile),
-            /// with the same safety caveats.
-            pub unsafe fn read_volatile(self) -> #name {
-                #name {
-                    #(#fields_names: self.#fields_names.read_volatile(), )*
-                }
-            }
-
-            /// Similar to [`*mut T::read_unaligned()`](https://doc.rust-lang.org/std/primitive.pointer.html#method.read_unaligned),
-            /// with the same safety caveats.
-            pub unsafe fn read_unaligned(self) -> #name {
-                #name {
-                    #(#fields_names: self.#fields_names.read_unaligned(), )*
                 }
             }
 
@@ -332,26 +264,6 @@ pub fn derive(input: &Input) -> TokenStream {
                 let mut val = ::core::mem::ManuallyDrop::new(val);
                 unsafe {
                     #(self.#fields_names.write(::core::ptr::read(&val.#fields_names));)*
-                }
-            }
-
-            /// Similar to [`*mut T::write_volatile()`](https://doc.rust-lang.org/std/primitive.pointer.html#method.write_volatile),
-            /// with the same safety caveats.
-            pub unsafe fn write_volatile(self, val: #name) {
-                // See `write`: ManuallyDrop prevents a double-free on unwind.
-                let mut val = ::core::mem::ManuallyDrop::new(val);
-                unsafe {
-                    #(self.#fields_names.write_volatile(::core::ptr::read(&val.#fields_names));)*
-                }
-            }
-
-            /// Similar to [`*mut T::write_unaligned()`](https://doc.rust-lang.org/std/primitive.pointer.html#method.write_unaligned),
-            /// with the same safety caveats.
-            pub unsafe fn write_unaligned(self, val: #name) {
-                // See `write`: ManuallyDrop prevents a double-free on unwind.
-                let mut val = ::core::mem::ManuallyDrop::new(val);
-                unsafe {
-                    #(self.#fields_names.write_unaligned(::core::ptr::read(&val.#fields_names));)*
                 }
             }
         }

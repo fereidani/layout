@@ -7,8 +7,7 @@
 //!
 //! `T` must implement [`CompactRepr`]. This is implemented for `bool` (1 bit)
 //! and, via `#[derive(CompactRepr)]`, for any fieldless enum with an unsigned
-//! `#[repr(uN)]` repr (2 / 4 / 8 / 16 bits depending on the largest
-//! discriminant).
+//! `#[repr(uN)]` repr (2 / 4 bits depending on the largest discriminant).
 //!
 //! # Access
 //!
@@ -42,8 +41,7 @@ pub trait CompactRepr: Copy + Sized + 'static {
     /// a concrete `PackedArray<N>`.
     type Storage: BitPack + 'static;
 
-    /// Number of bits used per element (`1` for `bool`; `2`/`4`/`8`/`16` for
-    /// enums).
+    /// Number of bits used per element (`1` for `bool`; `2`/`4` for enums).
     const BITS: u32;
 
     /// Encode `self` into the raw integer stored in the packed words.
@@ -132,14 +130,21 @@ impl<T: CompactRepr> From<T> for Compact<T> {
 
 #[cfg(feature = "serde")]
 impl<T: CompactRepr + serde::Serialize> serde::Serialize for Compact<T> {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
         self.0.serialize(serializer)
     }
 }
 
 #[cfg(feature = "serde")]
-impl<'de, T: CompactRepr + serde::Deserialize<'de>> serde::Deserialize<'de> for Compact<T> {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+impl<'de, T: CompactRepr + serde::Deserialize<'de>> serde::Deserialize<'de>
+    for Compact<T>
+{
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Self, D::Error> {
         T::deserialize(deserializer).map(Compact)
     }
 }
@@ -273,7 +278,9 @@ impl<'a, T: CompactRepr + PartialEq> PartialEq for CompactRefMut<'a, T> {
 
 impl<'a, T: CompactRepr + Eq> Eq for CompactRefMut<'a, T> {}
 
-impl<'a, T: CompactRepr + core::hash::Hash> core::hash::Hash for CompactRefMut<'a, T> {
+impl<'a, T: CompactRepr + core::hash::Hash> core::hash::Hash
+    for CompactRefMut<'a, T>
+{
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         self.get().hash(state);
     }
@@ -333,7 +340,9 @@ impl<T: CompactRepr> Default for CompactVec<T> {
 impl<T: CompactRepr + core::fmt::Debug> core::fmt::Debug for CompactVec<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_list()
-            .entries((0..self.len()).map(|i| Compact(T::decode(self.inner.get(i)))))
+            .entries(
+                (0..self.len()).map(|i| Compact(T::decode(self.inner.get(i)))),
+            )
             .finish()
     }
 }
@@ -349,8 +358,9 @@ impl<T: CompactRepr> Clone for CompactVec<T> {
 impl<T: CompactRepr + PartialEq> PartialEq for CompactVec<T> {
     fn eq(&self, other: &Self) -> bool {
         self.len() == other.len()
-            && (0..self.len())
-                .all(|i| T::decode(self.inner.get(i)) == T::decode(other.inner.get(i)))
+            && (0..self.len()).all(|i| {
+                T::decode(self.inner.get(i)) == T::decode(other.inner.get(i))
+            })
     }
 }
 
@@ -542,7 +552,12 @@ impl<T: CompactRepr> CompactVec<T> {
     }
 
     pub fn split_off(&mut self, at: usize) -> CompactVec<T> {
-        assert!(at <= self.len(), "the len is {} but the index is {}", self.len(), at);
+        assert!(
+            at <= self.len(),
+            "the len is {} but the index is {}",
+            self.len(),
+            at
+        );
         let mut other = Store::<T>::with_capacity(self.len() - at);
         for i in at..self.inner.len() {
             other.push(self.inner.get(i));
@@ -598,7 +613,8 @@ impl<T: CompactRepr> CompactVec<T> {
         }
     }
 
-    /// Iterate by mutable handle over the column (analogous to `Vec::iter_mut`).
+    /// Iterate by mutable handle over the column (analogous to
+    /// `Vec::iter_mut`).
     #[inline]
     pub fn iter_mut(&mut self) -> CompactIterMut<'_, T> {
         CompactIterMut {
@@ -667,8 +683,8 @@ impl<T: CompactRepr> CompactVec<T> {
         }
     }
 
-    /// Reconstruct a [`CompactVec`] from the raw packed-storage pointer obtained
-    /// from [`CompactVec::as_mut_ptr`].
+    /// Reconstruct a [`CompactVec`] from the raw packed-storage pointer
+    /// obtained from [`CompactVec::as_mut_ptr`].
     ///
     /// Unlike `Vec::from_raw_parts`, no `len`/`capacity` are required: the
     /// [`PackedArray`](crate::bitpack::PackedArray) (`data.packed`) carries its
@@ -678,14 +694,15 @@ impl<T: CompactRepr> CompactVec<T> {
     /// `data` must originate from [`CompactVec::as_mut_ptr`], the source
     /// [`CompactVec`] must have been forgotten (e.g. via [`core::mem::forget`])
     /// and its storage not reused or freed since, and `data.packed` must still
-    /// point to valid, properly aligned `Store<T>` storage. This constructor moves
-    /// that storage out of the (forgotten) source, so the source must never be
-    /// used or dropped again.
+    /// point to valid, properly aligned `Store<T>` storage. This constructor
+    /// moves that storage out of the (forgotten) source, so the source must
+    /// never be used or dropped again.
     pub unsafe fn from_raw_parts(data: CompactPtrMut<T>) -> CompactVec<T> {
         CompactVec {
-            // SAFETY: `data.packed` points to a live, owned, inline `PackedArray`
-            // that the caller has given up (forgotten the source). We move it out
-            // by value; the source must not be dropped again.
+            // SAFETY: `data.packed` points to a live, owned, inline
+            // `PackedArray` that the caller has given up (forgotten
+            // the source). We move it out by value; the source must
+            // not be dropped again.
             inner: unsafe { core::ptr::read(data.packed) },
         }
     }
@@ -800,7 +817,10 @@ impl<'a, T: CompactRepr> IntoIterator for &'a mut CompactVec<T> {
 
 #[cfg(feature = "serde")]
 impl<T: CompactRepr + serde::Serialize> serde::Serialize for CompactVec<T> {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeSeq;
         let mut seq = serializer.serialize_seq(Some(self.len()))?;
         for val in self.iter() {
@@ -811,19 +831,31 @@ impl<T: CompactRepr + serde::Serialize> serde::Serialize for CompactVec<T> {
 }
 
 #[cfg(feature = "serde")]
-impl<'de, T: CompactRepr + serde::Deserialize<'de>> serde::Deserialize<'de> for CompactVec<T> {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+impl<'de, T: CompactRepr + serde::Deserialize<'de>> serde::Deserialize<'de>
+    for CompactVec<T>
+{
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Self, D::Error> {
         use core::fmt;
+
         use serde::de::{SeqAccess, Visitor};
 
         struct CompactVecVisitor<T: CompactRepr>(PhantomData<T>);
-        impl<'de, T: CompactRepr + serde::Deserialize<'de>> Visitor<'de> for CompactVecVisitor<T> {
+        impl<'de, T: CompactRepr + serde::Deserialize<'de>> Visitor<'de>
+            for CompactVecVisitor<T>
+        {
             type Value = CompactVec<T>;
             fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
                 f.write_str("a sequence of compact values")
             }
-            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-                let mut v = CompactVec::<T>::with_capacity(seq.size_hint().unwrap_or(0));
+            fn visit_seq<A: SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut v = CompactVec::<T>::with_capacity(
+                    seq.size_hint().unwrap_or(0),
+                );
                 while let Some(elem) = seq.next_element::<T>()? {
                     v.push(Compact(elem));
                 }
@@ -1113,7 +1145,9 @@ impl<'a, T: CompactRepr> IntoIterator for CompactSlice<'a, T> {
     }
 }
 
-impl<T: CompactRepr + core::fmt::Debug> core::fmt::Debug for CompactSlice<'_, T> {
+impl<T: CompactRepr + core::fmt::Debug> core::fmt::Debug
+    for CompactSlice<'_, T>
+{
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_list().entries(self.iter()).finish()
     }
@@ -1127,7 +1161,9 @@ impl<'a, T: CompactRepr + PartialEq> PartialEq for CompactSlice<'a, T> {
 
 impl<'a, T: CompactRepr + Eq> Eq for CompactSlice<'a, T> {}
 
-impl<'a, T: CompactRepr + core::hash::Hash> core::hash::Hash for CompactSlice<'a, T> {
+impl<'a, T: CompactRepr + core::hash::Hash> core::hash::Hash
+    for CompactSlice<'a, T>
+{
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         self.len.hash(state);
         for val in self.iter() {
@@ -1548,7 +1584,9 @@ impl<'a, T: CompactRepr> IntoIterator for CompactSliceMut<'a, T> {
     }
 }
 
-impl<T: CompactRepr + core::fmt::Debug> core::fmt::Debug for CompactSliceMut<'_, T> {
+impl<T: CompactRepr + core::fmt::Debug> core::fmt::Debug
+    for CompactSliceMut<'_, T>
+{
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_list().entries(self.iter()).finish()
     }
@@ -1562,7 +1600,9 @@ impl<'a, T: CompactRepr + PartialEq> PartialEq for CompactSliceMut<'a, T> {
 
 impl<'a, T: CompactRepr + Eq> Eq for CompactSliceMut<'a, T> {}
 
-impl<'a, T: CompactRepr + core::hash::Hash> core::hash::Hash for CompactSliceMut<'a, T> {
+impl<'a, T: CompactRepr + core::hash::Hash> core::hash::Hash
+    for CompactSliceMut<'a, T>
+{
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         self.len.hash(state);
         for val in self.iter() {
@@ -1681,13 +1721,6 @@ impl<T: CompactRepr> CompactPtr<T> {
         }
     }
 
-    pub fn wrapping_offset(self, count: isize) -> CompactPtr<T> {
-        CompactPtr {
-            packed: self.packed,
-            index: self.index.wrapping_add(count as usize),
-        }
-    }
-
     /// Produces a pointer advanced by `count` elements (analogous to
     /// [`pointer::add`](core::pointer::add)).
     ///
@@ -1716,20 +1749,6 @@ impl<T: CompactRepr> CompactPtr<T> {
         }
     }
 
-    pub fn wrapping_add(self, count: usize) -> CompactPtr<T> {
-        CompactPtr {
-            packed: self.packed,
-            index: self.index.wrapping_add(count),
-        }
-    }
-
-    pub fn wrapping_sub(self, count: usize) -> CompactPtr<T> {
-        CompactPtr {
-            packed: self.packed,
-            index: self.index.wrapping_sub(count),
-        }
-    }
-
     /// Reads the element the pointer references (analogous to
     /// [`pointer::read`](core::pointer::read)).
     ///
@@ -1739,26 +1758,6 @@ impl<T: CompactRepr> CompactPtr<T> {
     /// must address an initialized element within it.
     pub unsafe fn read(self) -> Compact<T> {
         Compact(T::decode((*self.packed).get(self.index)))
-    }
-
-    /// Reads the element the pointer references (analogous to
-    /// [`pointer::read_volatile`](core::pointer::read_volatile)).
-    ///
-    /// # Safety
-    ///
-    /// See [`read`](CompactPtr::read).
-    pub unsafe fn read_volatile(self) -> Compact<T> {
-        self.read()
-    }
-
-    /// Reads the element the pointer references (analogous to
-    /// [`pointer::read_unaligned`](core::pointer::read_unaligned)).
-    ///
-    /// # Safety
-    ///
-    /// See [`read`](CompactPtr::read).
-    pub unsafe fn read_unaligned(self) -> Compact<T> {
-        self.read()
     }
 }
 
@@ -1820,13 +1819,6 @@ impl<T: CompactRepr> CompactPtrMut<T> {
         }
     }
 
-    pub fn wrapping_offset(self, count: isize) -> CompactPtrMut<T> {
-        CompactPtrMut {
-            packed: self.packed,
-            index: self.index.wrapping_add(count as usize),
-        }
-    }
-
     /// Produces a pointer advanced by `count` elements (analogous to
     /// [`pointer::add`](core::pointer::add)).
     ///
@@ -1855,20 +1847,6 @@ impl<T: CompactRepr> CompactPtrMut<T> {
         }
     }
 
-    pub fn wrapping_add(self, count: usize) -> CompactPtrMut<T> {
-        CompactPtrMut {
-            packed: self.packed,
-            index: self.index.wrapping_add(count),
-        }
-    }
-
-    pub fn wrapping_sub(self, count: usize) -> CompactPtrMut<T> {
-        CompactPtrMut {
-            packed: self.packed,
-            index: self.index.wrapping_sub(count),
-        }
-    }
-
     /// Reads the element the pointer references (analogous to
     /// [`pointer::read`](core::pointer::read)).
     ///
@@ -1878,26 +1856,6 @@ impl<T: CompactRepr> CompactPtrMut<T> {
     /// must address an initialized element within it.
     pub unsafe fn read(self) -> Compact<T> {
         Compact(T::decode((*self.packed).get(self.index)))
-    }
-
-    /// Reads the element the pointer references (analogous to
-    /// [`pointer::read_volatile`](core::pointer::read_volatile)).
-    ///
-    /// # Safety
-    ///
-    /// See [`read`](CompactPtrMut::read).
-    pub unsafe fn read_volatile(self) -> Compact<T> {
-        self.read()
-    }
-
-    /// Reads the element the pointer references (analogous to
-    /// [`pointer::read_unaligned`](core::pointer::read_unaligned)).
-    ///
-    /// # Safety
-    ///
-    /// See [`read`](CompactPtrMut::read).
-    pub unsafe fn read_unaligned(self) -> Compact<T> {
-        self.read()
     }
 
     /// Overwrites the element the pointer references (analogous to
@@ -1911,28 +1869,6 @@ impl<T: CompactRepr> CompactPtrMut<T> {
     #[allow(clippy::forget_non_drop)]
     pub unsafe fn write(self, val: Compact<T>) {
         (*self.packed).set(self.index, T::encode(val.0));
-    }
-
-    /// Overwrites the element the pointer references (analogous to
-    /// [`pointer::write_volatile`](core::pointer::write_volatile)).
-    ///
-    /// # Safety
-    ///
-    /// See [`write`](CompactPtrMut::write).
-    #[allow(clippy::forget_non_drop)]
-    pub unsafe fn write_volatile(self, val: Compact<T>) {
-        self.write(val);
-    }
-
-    /// Overwrites the element the pointer references (analogous to
-    /// [`pointer::write_unaligned`](core::pointer::write_unaligned)).
-    ///
-    /// # Safety
-    ///
-    /// See [`write`](CompactPtrMut::write).
-    #[allow(clippy::forget_non_drop)]
-    pub unsafe fn write_unaligned(self, val: Compact<T>) {
-        self.write(val);
     }
 }
 
