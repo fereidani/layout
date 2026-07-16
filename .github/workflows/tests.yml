@@ -2,27 +2,40 @@ name: Test
 
 on:
   push:
-    branches: [master]
+    branches: [main]
   pull_request:
     # Check all PR
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  tests:
-    runs-on: ubuntu-20.04
+  test:
+    name: rust ${{ matrix.rust }}
+    runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        rust-version: ["1.65", stable, beta, nightly]
+        rust: ["1.71", stable, beta, nightly]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: true
       - name: setup rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ matrix.rust-version }}
+          toolchain: ${{ matrix.rust }}
       - name: run tests in debug mode
         run: cargo test
+      - name: run tests in debug mode (serde feature)
+        run: cargo test --features serde
       - name: run tests in release mode
         run: cargo test --release
+      - name: run tests in release mode (serde feature)
+        run: cargo test --release --features serde
       - name: check that benchmarks still compile
         run: cargo bench --no-run
+      - name: check no_std build
+        run: cargo build --no-default-features
+      - name: check no_std build (serde feature)
+        run: cargo build --no-default-features --features serde

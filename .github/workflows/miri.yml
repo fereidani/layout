@@ -1,0 +1,29 @@
+name: Miri
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    # Check all PR
+  schedule:
+    # Run nightly to catch UB regressions against the latest nightly toolchain.
+    - cron: '37 3 * * *'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  miri:
+    name: Miri (nightly)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: setup rust (nightly + miri)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+          components: miri
+      - name: run miri
+        run: cargo miri test

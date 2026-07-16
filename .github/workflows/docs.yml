@@ -2,7 +2,7 @@ name: Documentation
 
 on:
   push:
-    branches: [master]
+    branches: [main]
     tags: ["*"]
   pull_request:
     # Check all PR
@@ -20,8 +20,7 @@ jobs:
           toolchain: stable
       - name: build documentation
         run: |
-          cd example
-          cargo doc --no-deps
+          cargo doc --no-deps --package layout
       - name: put documentation in the website
         run: |
           git clone https://github.com/$GITHUB_REPOSITORY --branch gh-pages gh-pages
@@ -31,12 +30,11 @@ jobs:
           REF_KIND=$(echo $GITHUB_REF | cut -d / -f2)
           if [[ "$REF_KIND" == "tags" ]]; then
               TAG=${GITHUB_REF#refs/tags/}
-              mv ../target/doc/ $TAG
-              cp ../example/index.html $TAG/index.html
+              rm -rf "$TAG"
+              mv ../target/doc/ "$TAG"
           else
               rm -rf latest
               mv ../target/doc/ latest
-              cp ../example/index.html latest/index.html
           fi
       - name: deploy to gh-pages
         if: github.event_name == 'push'
