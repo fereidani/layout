@@ -301,8 +301,18 @@ pub use layout_internal::CompactRepr;
 pub fn __invert_permutation(argsort: &[usize]) -> Vec<usize> {
     // `dest[src]` = the sorted position of the element currently at `src`.
     // `argsort[pos] = src`, so invert by assigning `dest[argsort[pos]] = pos`.
-    let mut dest = alloc::vec![0usize; argsort.len()];
+    // `usize::MAX` doubles as the "not yet assigned" sentinel: a slice of
+    // `usize::MAX` elements cannot exist, so no valid position collides with
+    // it. Rejecting out-of-range and duplicate sources here guarantees the
+    // returned `dest` is a genuine permutation of `0..argsort.len()`.
+    let len = argsort.len();
+    let mut dest = alloc::vec![usize::MAX; len];
     for (pos, &src) in argsort.iter().enumerate() {
+        assert!(src < len, "index {src} out of bounds for length {len}");
+        assert!(
+            dest[src] == usize::MAX,
+            "duplicate index {src}: indices must form a permutation"
+        );
         dest[src] = pos;
     }
     dest
@@ -314,8 +324,27 @@ pub fn __invert_permutation(argsort: &[usize]) -> Vec<usize> {
 #[doc(hidden)]
 pub fn __apply_permutation_inplace<T>(slice: &mut [T], dest: &[usize]) {
     let len = slice.len();
-    debug_assert_eq!(dest.len(), len);
+    // The cycle-walk below `ptr::read`s elements out of the slice, so every
+    // precondition must hold *before* it starts: a wrong-length or
+    // non-permutation `dest` would otherwise panic mid-cycle while a bitwise
+    // duplicate of a non-`Copy` element is live (double drop on unwind), or
+    // walk a cycle that never closes. Validate eagerly; the `visited` bitmap
+    // is reused for the walk afterwards.
+    assert!(
+        dest.len() == len,
+        "permutation length {} does not match slice length {len}",
+        dest.len()
+    );
     let mut visited = alloc::vec![false; len];
+    for &d in dest {
+        assert!(d < len, "index {d} out of bounds for length {len}");
+        assert!(
+            !visited[d],
+            "duplicate index {d}: indices must form a permutation"
+        );
+        visited[d] = true;
+    }
+    visited.fill(false);
     for start in 0..len {
         if visited[start] {
             continue;
