@@ -99,6 +99,15 @@ pub fn derive(input: &Input) -> TokenStream {
         )
         .collect::<Vec<_>>();
 
+    // `to_vec` field values: plain columns wrap their `Vec` in `Column`;
+    // compact/nested columns already produce the matching owning type.
+    let slice_to_vec_fields = input
+        .map_fields_nested_or(
+            |ident, _, _| quote! { self.#ident.to_vec() },
+            |ident, _| quote! { ::layout::Column::from_vec(self.#ident.to_vec()) },
+        )
+        .collect::<Vec<_>>();
+
     let slice_from_raw_parts = input
         .map_fields_nested_or(
             |ident, field_type, compact| {
@@ -474,7 +483,7 @@ pub fn derive(input: &Input) -> TokenStream {
                 /// ::to_vec()`](https://doc.rust-lang.org/std/primitive.slice.html#method.to_vec).
                 pub fn to_vec(&self) -> #vec_name {
                     #vec_name {
-                        #(#fields_names: self.#fields_names.to_vec(),)*
+                        #(#fields_names: #slice_to_vec_fields,)*
                     }
                 }
             }
@@ -574,6 +583,15 @@ pub fn derive_mut(input: &Input) -> TokenStream {
         .map_fields_nested_or(
             |ident, _, _| quote! { self.#ident.reborrow() },
             |ident, _| quote! { &mut self.#ident },
+        )
+        .collect::<Vec<_>>();
+
+    // `to_vec` field values (see the matching definition for the immutable
+    // slice): plain columns wrap their `Vec` in `Column`.
+    let slice_to_vec_fields = input
+        .map_fields_nested_or(
+            |ident, _, _| quote! { self.#ident.to_vec() },
+            |ident, _| quote! { ::layout::Column::from_vec(self.#ident.to_vec()) },
         )
         .collect::<Vec<_>>();
 
@@ -1230,7 +1248,7 @@ pub fn derive_mut(input: &Input) -> TokenStream {
                 /// ::to_vec()`](https://doc.rust-lang.org/std/primitive.slice.html#method.to_vec).
                 pub fn to_vec(&self) -> #vec_name {
                     #vec_name {
-                        #(#fields_names: self.#fields_names.to_vec(),)*
+                        #(#fields_names: #slice_to_vec_fields,)*
                     }
                 }
             }

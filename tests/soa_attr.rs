@@ -16,12 +16,18 @@ impl Particle {
 #[test]
 fn eq_test() {
     let particles0 = ParticleVec {
-        name: vec![String::from("foo"), String::from("bar")],
-        mass: vec![1.0, 2.0],
+        name: layout::Column::from_vec(vec![
+            String::from("foo"),
+            String::from("bar"),
+        ]),
+        mass: layout::Column::from_vec(vec![1.0, 2.0]),
     };
     let particles1 = ParticleVec {
-        name: vec![String::from("foo"), String::from("bar")],
-        mass: vec![1.0, 2.0],
+        name: layout::Column::from_vec(vec![
+            String::from("foo"),
+            String::from("bar"),
+        ]),
+        mass: layout::Column::from_vec(vec![1.0, 2.0]),
     };
     assert_eq!(particles0, particles1);
 }

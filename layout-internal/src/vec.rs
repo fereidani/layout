@@ -44,14 +44,14 @@ pub fn derive(input: &Input) -> TokenStream {
                 let t = names::vec_name(field_type);
                 quote! { #t }
             },
-            |_, field_type| quote! { Vec<#field_type> },
+            |_, field_type| quote! { ::layout::Column<#field_type> },
         )
         .collect::<Vec<_>>();
 
     let vec_with_capacity = input
         .map_fields_nested_or(
             |_, field_type, _| quote! { <#field_type as SOA>::Type::with_capacity(capacity) },
-            |_, _| quote! { Vec::with_capacity(capacity) },
+            |_, _| quote! { ::layout::Column::with_capacity(capacity) },
         )
         .collect::<Vec<_>>();
 
@@ -82,7 +82,7 @@ pub fn derive(input: &Input) -> TokenStream {
                     quote! { <#vec_type>::from_raw_parts(data.#ident, len, capacity) }
                 }
             },
-            |ident, _| quote! { Vec::from_raw_parts(data.#ident, len, capacity) },
+            |ident, _| quote! { ::layout::Column::from_raw_parts(data.#ident, len, capacity) },
         )
         .collect::<Vec<_>>();
 
@@ -180,7 +180,10 @@ pub fn derive(input: &Input) -> TokenStream {
             /// ::truncate()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.truncate)
             /// truncating all fields.
             pub fn truncate(&mut self, len: usize) {
-                #(self.#fields_names.truncate(len);)*
+                // SAFETY: every column is truncated to the same length.
+                unsafe {
+                    #(self.#fields_names.truncate(len);)*
+                }
             }
 
             /// Similar to [`
@@ -220,8 +223,10 @@ pub fn derive(input: &Input) -> TokenStream {
             #[doc = #vec_name_str]
             /// ::swap_remove()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.swap_remove).
             pub fn swap_remove(&mut self, index: usize) -> #name {
+                // SAFETY: the same index is swap-removed from every column.
                 #(
-                    let #fields_names_hygienic = self.#fields_names.swap_remove(index);
+                    let #fields_names_hygienic =
+                        unsafe { self.#fields_names.swap_remove(index) };
                 )*
                 #name{#(#fields_names: #fields_names_hygienic),*}
             }
@@ -261,8 +266,10 @@ pub fn derive(input: &Input) -> TokenStream {
             #[doc = #vec_name_str]
             /// ::remove()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.remove).
             pub fn remove(&mut self, index: usize) -> #name {
+                // SAFETY: the same index is removed from every column.
                 #(
-                    let #fields_names_hygienic = self.#fields_names.remove(index);
+                    let #fields_names_hygienic =
+                        unsafe { self.#fields_names.remove(index) };
                 )*
                 #name{#(#fields_names: #fields_names_hygienic),*}
             }
@@ -274,8 +281,10 @@ pub fn derive(input: &Input) -> TokenStream {
                 if ::layout::branches::unlikely(self.is_empty()) {
                     None
                 } else {
+                    // SAFETY: every column is popped once.
                     #(
-                        let #fields_names_hygienic = self.#fields_names.pop().unwrap();
+                        let #fields_names_hygienic =
+                            unsafe { self.#fields_names.pop().unwrap() };
                     )*
                     Some(#name{#(#fields_names: #fields_names_hygienic),*})
                 }
@@ -285,24 +294,33 @@ pub fn derive(input: &Input) -> TokenStream {
             #[doc = #vec_name_str]
             /// ::append()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.append).
             pub fn append(&mut self, other: &mut #vec_name) {
-                #(
-                    self.#fields_names.append(&mut other.#fields_names);
-                )*
+                // SAFETY: every column appends its sibling.
+                unsafe {
+                    #(
+                        self.#fields_names.append(&mut other.#fields_names);
+                    )*
+                }
             }
 
             /// Similar to [`
             #[doc = #vec_name_str]
             /// ::clear()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.clear).
             pub fn clear(&mut self) {
-                #(self.#fields_names.clear();)*
+                // SAFETY: every column is cleared.
+                unsafe {
+                    #(self.#fields_names.clear();)*
+                }
             }
 
             /// Similar to [`
             #[doc = #vec_name_str]
             /// ::split_off()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.split_off).
             pub fn split_off(&mut self, at: usize) -> #vec_name {
-                #vec_name {
-                    #(#fields_names: self.#fields_names.split_off(at), )*
+                // SAFETY: every column splits at the same index.
+                unsafe {
+                    #vec_name {
+                        #(#fields_names: self.#fields_names.split_off(at), )*
+                    }
                 }
             }
 
@@ -475,8 +493,11 @@ pub fn derive(input: &Input) -> TokenStream {
             #[doc = #vec_name_str]
             /// ::drain()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.drain).
             pub fn drain<R: ::core::ops::RangeBounds<usize> + Clone>(&mut self, range: R) -> #drain_name<'_> {
-                #drain_name {
-                    #( #fields_names: self.#fields_names.drain(range.clone()), )*
+                // SAFETY: every column drains the same range.
+                unsafe {
+                    #drain_name {
+                        #( #fields_names: self.#fields_names.drain(range.clone()), )*
+                    }
                 }
             }
         }
@@ -547,17 +568,23 @@ pub fn derive(input: &Input) -> TokenStream {
                 #[doc = #vec_name_str]
                 /// ::resize()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.resize).
                 pub fn resize(&mut self, new_len: usize, value: #name) {
-                    #(
-                        self.#fields_names.resize(new_len, value.#fields_names);
-                    )*
+                    // SAFETY: every column is resized to the same length.
+                    unsafe {
+                        #(
+                            self.#fields_names.resize(new_len, value.#fields_names);
+                        )*
+                    }
                 }
             }
 
             impl ::layout::SoAAppendVec<#name> for #vec_name {
                 fn extend_from_slice(&mut self, other: Self::Slice<'_>) {
-                    #(
-                        self.#fields_names.extend_from_slice(other.#fields_names);
-                    )*
+                    // SAFETY: every column extends from its sibling slice.
+                    unsafe {
+                        #(
+                            self.#fields_names.extend_from_slice(other.#fields_names);
+                        )*
+                    }
                 }
             }
         });

@@ -270,7 +270,16 @@ pub use layout_internal::soa_impl;
 pub use layout_internal::SOA;
 
 pub mod bitpack;
+pub mod column;
 pub mod compact;
+
+/// Owning, length-locked storage for one plain struct-of-arrays column.
+///
+/// Generated `Vec` types store each plain field as a `Column<T>` (which
+/// dereferences to `[T]`) instead of a bare `Vec<T>`, so that safe code cannot
+/// change one column's length independently of the others. See the
+/// [`column`] module for details.
+pub use column::Column;
 
 // Re-exported for use in generated code. Not intended for direct use.
 #[doc(hidden)]

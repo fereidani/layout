@@ -66,10 +66,10 @@ fn nested_soa() {
     assert_eq!(
         particle_vec.color,
         ColorVec {
-            r: vec![255, 128],
-            g: vec![0, 255],
-            b: vec![0, 100],
-            a: vec![255, 23],
+            r: layout::Column::from_vec(vec![255, 128]),
+            g: layout::Column::from_vec(vec![0, 255]),
+            b: layout::Column::from_vec(vec![0, 100]),
+            a: layout::Column::from_vec(vec![255, 23]),
         }
     );
 }
