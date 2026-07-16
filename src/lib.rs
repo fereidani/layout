@@ -276,6 +276,10 @@ pub mod compact;
 #[doc(hidden)]
 pub use alloc::vec::Drain;
 
+// Re-exported so generated code can use `::layout::branches::likely` /
+// `unlikely` without downstream crates depending on `branches` themselves.
+#[doc(hidden)]
+pub use branches;
 /// Trait implemented by types that can be stored in a compact (bit-packed)
 /// column: `bool` and any fieldless enum that derives `CompactRepr`.
 pub use compact::CompactRepr;
