@@ -9,9 +9,18 @@ pub struct C {
 #[test]
 fn compact_round_trip() {
     let mut v = CVec::new();
-    v.push(C { id: 1, flag: Compact(true) });
-    v.push(C { id: 2, flag: Compact(false) });
-    v.push(C { id: 3, flag: Compact(true) });
+    v.push(C {
+        id: 1,
+        flag: Compact(true),
+    });
+    v.push(C {
+        id: 2,
+        flag: Compact(false),
+    });
+    v.push(C {
+        id: 3,
+        flag: Compact(true),
+    });
     let len = v.len();
     let cap = v.id.capacity();
     let ptr = v.as_mut_ptr();

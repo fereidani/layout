@@ -273,14 +273,6 @@ pub mod bitpack;
 pub mod column;
 pub mod compact;
 
-/// Owning, length-locked storage for one plain struct-of-arrays column.
-///
-/// Generated `Vec` types store each plain field as a `Column<T>` (which
-/// dereferences to `[T]`) instead of a bare `Vec<T>`, so that safe code cannot
-/// change one column's length independently of the others. See the
-/// [`column`] module for details.
-pub use column::Column;
-
 // Re-exported for use in generated code. Not intended for direct use.
 #[doc(hidden)]
 pub use alloc::vec::Drain;
@@ -289,6 +281,13 @@ pub use alloc::vec::Drain;
 // `unlikely` without downstream crates depending on `branches` themselves.
 #[doc(hidden)]
 pub use branches;
+/// Owning, length-locked storage for one plain struct-of-arrays column.
+///
+/// Generated `Vec` types store each plain field as a `Column<T>` (which
+/// dereferences to `[T]`) instead of a bare `Vec<T>`, so that safe code
+/// cannot change one column's length independently of the others. See the
+/// [`column`] module for details.
+pub use column::Column;
 /// Trait implemented by types that can be stored in a compact (bit-packed)
 /// column: `bool` and any fieldless enum that derives `CompactRepr`.
 pub use compact::CompactRepr;

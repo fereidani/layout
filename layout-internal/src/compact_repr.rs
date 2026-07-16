@@ -24,7 +24,7 @@ pub fn derive_compact_repr(input: &DeriveInput) -> TokenStream {
         return err_span(
             input.ident.span(),
             "#[derive(CompactRepr)] only supports enums".to_string(),
-        )
+        );
     };
 
     let Some(_repr_int) = find_unsigned_repr(&input.attrs) else {
@@ -34,7 +34,7 @@ pub fn derive_compact_repr(input: &DeriveInput) -> TokenStream {
              (one of #[repr(u8)], #[repr(u16)], #[repr(u32)], #[repr(u64)] or \
              #[repr(usize)])"
                 .to_string(),
-        )
+        );
     };
 
     // Walk the variants: collect each `(variant_ident, discriminant)` pair in
@@ -87,8 +87,9 @@ pub fn derive_compact_repr(input: &DeriveInput) -> TokenStream {
         4..=15 => 4,
         _ => {
             // Above 4 bits (16 values) `Compact` storage is byte-for-byte the
-            // same size as a plain `Vec<Enum>` with `#[repr(u8)]`/`#[repr(u16)]`,
-            // but it adds encode/decode + bit-op overhead on every access — the
+            // same size as a plain `Vec<Enum>` with
+            // `#[repr(u8)]`/`#[repr(u16)]`, but it adds
+            // encode/decode + bit-op overhead on every access — the
             // compaction buys nothing. Reject it and point the user at a plain
             // field instead.
             return err_span(

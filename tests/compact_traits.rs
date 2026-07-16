@@ -1,8 +1,10 @@
 //! Trait impls on `CompactVec<T>`: `PartialEq`/`Eq`, `Hash`,
 //! `FromIterator`/`Extend`, and value-listing `Debug`.
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+};
 
 use layout::{Compact, CompactRepr, CompactVec};
 
@@ -27,22 +29,28 @@ fn hash_of<T: Hash>(value: &T) -> u64 {
 
 #[test]
 fn bool_column_eq() {
-    let a: CompactVec<bool> = [true, false, true].iter().copied().map(Compact).collect();
-    let b: CompactVec<bool> = [true, false, true].iter().copied().map(Compact).collect();
+    let a: CompactVec<bool> =
+        [true, false, true].iter().copied().map(Compact).collect();
+    let b: CompactVec<bool> =
+        [true, false, true].iter().copied().map(Compact).collect();
     assert_eq!(a, b);
 }
 
 #[test]
 fn bool_column_ne_by_element() {
-    let a: CompactVec<bool> = [true, false, true].iter().copied().map(Compact).collect();
-    let b: CompactVec<bool> = [true, true, true].iter().copied().map(Compact).collect();
+    let a: CompactVec<bool> =
+        [true, false, true].iter().copied().map(Compact).collect();
+    let b: CompactVec<bool> =
+        [true, true, true].iter().copied().map(Compact).collect();
     assert_ne!(a, b);
 }
 
 #[test]
 fn bool_column_ne_by_length() {
-    let a: CompactVec<bool> = [true, false].iter().copied().map(Compact).collect();
-    let b: CompactVec<bool> = [true, false, true].iter().copied().map(Compact).collect();
+    let a: CompactVec<bool> =
+        [true, false].iter().copied().map(Compact).collect();
+    let b: CompactVec<bool> =
+        [true, false, true].iter().copied().map(Compact).collect();
     assert_ne!(a, b);
 }
 
@@ -74,15 +82,19 @@ fn enum_column_eq_and_ne() {
 
 #[test]
 fn equal_columns_hash_equally() {
-    let a: CompactVec<bool> = [true, false, true].iter().copied().map(Compact).collect();
-    let b: CompactVec<bool> = [true, false, true].iter().copied().map(Compact).collect();
+    let a: CompactVec<bool> =
+        [true, false, true].iter().copied().map(Compact).collect();
+    let b: CompactVec<bool> =
+        [true, false, true].iter().copied().map(Compact).collect();
     assert_eq!(hash_of(&a), hash_of(&b));
 }
 
 #[test]
 fn unequal_columns_hash_differently() {
-    let a: CompactVec<bool> = [true, false, true].iter().copied().map(Compact).collect();
-    let b: CompactVec<bool> = [true, true, true].iter().copied().map(Compact).collect();
+    let a: CompactVec<bool> =
+        [true, false, true].iter().copied().map(Compact).collect();
+    let b: CompactVec<bool> =
+        [true, true, true].iter().copied().map(Compact).collect();
     assert_ne!(hash_of(&a), hash_of(&b));
 }
 
@@ -113,7 +125,8 @@ fn enum_column_hash_matches_contents() {
 
 #[test]
 fn from_iter_builds_contents() {
-    let v: CompactVec<bool> = [true, false, true].iter().copied().map(Compact).collect();
+    let v: CompactVec<bool> =
+        [true, false, true].iter().copied().map(Compact).collect();
     assert_eq!(v.len(), 3);
     assert_eq!(v.get(0), Some(Compact(true)));
     assert_eq!(v.get(1), Some(Compact(false)));
@@ -138,7 +151,8 @@ fn extend_appends() {
 
 #[test]
 fn extend_empty_is_noop() {
-    let mut v: CompactVec<Kind> = [Kind::Red].iter().copied().map(Compact).collect();
+    let mut v: CompactVec<Kind> =
+        [Kind::Red].iter().copied().map(Compact).collect();
     v.extend(std::iter::empty::<Compact<Kind>>());
     assert_eq!(v.len(), 1);
     assert_eq!(v.get(0), Some(Compact(Kind::Red)));
@@ -150,7 +164,8 @@ fn extend_empty_is_noop() {
 
 #[test]
 fn debug_bool_lists_values() {
-    let v: CompactVec<bool> = [true, false].iter().copied().map(Compact).collect();
+    let v: CompactVec<bool> =
+        [true, false].iter().copied().map(Compact).collect();
     let s = format!("{:?}", v);
     assert!(s.contains("true"), "got: {}", s);
     assert!(s.contains("false"), "got: {}", s);
@@ -173,7 +188,8 @@ fn debug_enum_lists_values() {
 
 #[test]
 fn debug_slice_lists_values() {
-    let v: CompactVec<bool> = [true, false].iter().copied().map(Compact).collect();
+    let v: CompactVec<bool> =
+        [true, false].iter().copied().map(Compact).collect();
     let s = format!("{:?}", v.as_slice());
     assert!(s.contains("true"), "got: {}", s);
     assert!(s.contains("false"), "got: {}", s);
@@ -181,7 +197,8 @@ fn debug_slice_lists_values() {
 
 #[test]
 fn debug_slice_mut_lists_values() {
-    let mut v: CompactVec<bool> = [true, false].iter().copied().map(Compact).collect();
+    let mut v: CompactVec<bool> =
+        [true, false].iter().copied().map(Compact).collect();
     let s = format!("{:?}", v.as_mut_slice());
     assert!(s.contains("true"), "got: {}", s);
     assert!(s.contains("false"), "got: {}", s);

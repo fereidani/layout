@@ -36,10 +36,10 @@ pub fn derive(input: &Input) -> TokenStream {
         )
         .collect::<Vec<_>>();
 
-    // The immutable-Ref construction sites below use comma-separated field lists
-    // (no trailing comma), so the marker init carries a leading comma. It is
-    // only non-empty for all-compact structs (whose `Ref<'a>` needs a PhantomData
-    // marker to use its lifetime).
+    // The immutable-Ref construction sites below use comma-separated field
+    // lists (no trailing comma), so the marker init carries a leading
+    // comma. It is only non-empty for all-compact structs (whose `Ref<'a>`
+    // needs a PhantomData marker to use its lifetime).
     let ref_marker_init: TokenStream = if input.ref_needs_lifetime_marker() {
         quote! { , __layout_ref_marker: ::core::marker::PhantomData }
     } else {
@@ -84,9 +84,13 @@ pub fn derive(input: &Input) -> TokenStream {
 
     let slice_fields_types = input
         .map_fields_nested_or(
-            |_, field_type, compact| if let Some(inner) = compact { names::slice_name_compact(inner) } else {
-                let id = names::slice_name(field_type);
-                quote! { #id<'a> }
+            |_, field_type, compact| {
+                if let Some(inner) = compact {
+                    names::slice_name_compact(inner)
+                } else {
+                    let id = names::slice_name(field_type);
+                    quote! { #id<'a> }
+                }
             },
             |_, field_type| quote! { &'a [#field_type] },
         )
@@ -557,9 +561,13 @@ pub fn derive_mut(input: &Input) -> TokenStream {
 
     let slice_mut_fields_types = input
         .map_fields_nested_or(
-            |_, field_type, compact| if let Some(inner) = compact { names::slice_mut_name_compact(inner) } else {
-                let id = names::slice_mut_name(field_type);
-                quote! { #id<'a> }
+            |_, field_type, compact| {
+                if let Some(inner) = compact {
+                    names::slice_mut_name_compact(inner)
+                } else {
+                    let id = names::slice_mut_name(field_type);
+                    quote! { #id<'a> }
+                }
             },
             |_, field_type| quote! { &'a mut [#field_type] },
         )
@@ -641,9 +649,13 @@ pub fn derive_mut(input: &Input) -> TokenStream {
     // mutable references, which is UB under the Stacked Borrows model.
     let chunks_mut_ptr_fields_types = input
         .map_fields_nested_or(
-            |_, field_type, compact| if let Some(inner) = compact { names::ptr_mut_name_compact(inner) } else {
-                let id = names::ptr_mut_name(field_type);
-                quote! { #id }
+            |_, field_type, compact| {
+                if let Some(inner) = compact {
+                    names::ptr_mut_name_compact(inner)
+                } else {
+                    let id = names::ptr_mut_name(field_type);
+                    quote! { #id }
+                }
             },
             |_, field_type| quote! { *mut #field_type },
         )

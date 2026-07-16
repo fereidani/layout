@@ -246,8 +246,8 @@ fn miri_count_enum() {
 // ---------------------------------------------------------------------------
 // Regression: CompactVec::swap_remove must not write out of bounds when
 // removing the last element. After pop(), `index == inner.len()`; the old guard
-// `index < inner.len() + 1` was always true here, so `set(index, ...)` wrote one
-// past the logical end (debug panic, release UB). The fix guards on
+// `index < inner.len() + 1` was always true here, so `set(index, ...)` wrote
+// one past the logical end (debug panic, release UB). The fix guards on
 // `index < inner.len()`.
 // ---------------------------------------------------------------------------
 

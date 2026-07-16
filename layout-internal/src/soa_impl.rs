@@ -205,8 +205,7 @@ impl VisitMut for SelfFieldTransformer<'_> {
             self.visit_expr_mut(&mut expr.right);
 
             if self.is_ref_mut && self.is_known_field(&expr.left) {
-                let prefixed =
-                    SelfFieldTransformer::prefix_deref(&expr.left);
+                let prefixed = SelfFieldTransformer::prefix_deref(&expr.left);
                 *expr.left = prefixed;
             }
         } else {
@@ -226,10 +225,7 @@ impl VisitMut for SelfFieldTransformer<'_> {
         self.suppress = prev;
     }
 
-    fn visit_expr_method_call_mut(
-        &mut self,
-        expr: &mut syn::ExprMethodCall,
-    ) {
+    fn visit_expr_method_call_mut(&mut self, expr: &mut syn::ExprMethodCall) {
         // A direct `self.field` receiver is a place that auto-derefs (e.g.
         // `self.flag.get()` on a `Compact<T>`, or `self.name.clone()` on a
         // `String`), so it must NOT be wrapped — skip it. Any other receiver is
@@ -302,7 +298,9 @@ fn tokens_mention_self(tokens: proc_macro2::TokenStream) -> bool {
     for tt in tokens {
         match tt {
             TokenTree::Ident(i) if i == "Self" => return true,
-            TokenTree::Group(g) if tokens_mention_self(g.stream()) => return true,
+            TokenTree::Group(g) if tokens_mention_self(g.stream()) => {
+                return true
+            }
             _ => {}
         }
     }
@@ -323,7 +321,10 @@ fn generate_ref_impl(
 
     for item in &item_impl.items {
         if let syn::ImplItem::Fn(method) = item {
-            if is_ref_self_method(method) && !returns_self(method) && !mentions_self(method) {
+            if is_ref_self_method(method)
+                && !returns_self(method)
+                && !mentions_self(method)
+            {
                 let mut cloned = method.clone();
                 let mut visitor = SelfFieldTransformer {
                     field_names,

@@ -101,12 +101,13 @@ fn contains_nested_soa(attrs: &[Attribute]) -> bool {
 /// alias), return the inner element type; otherwise `None`.
 ///
 /// Detection is by the path-segment NAME (`Compact` / `CompactBool`). A renamed
-/// or re-exported import (e.g. `use layout::Compact as Packed; field: Packed<bool>`)
-/// is therefore NOT recognized and the field silently falls back to a plain
-/// `Vec`. This is a proc-macro limitation — without type resolution the derive
-/// cannot map an arbitrary alias back to `Compact`. Users must keep the import
-/// names `Compact` / `CompactBool` (fully-qualified `::layout::Compact<T>` and
-/// `path::Compact<T>` still work, since the last segment is still `Compact`).
+/// or re-exported import (e.g. `use layout::Compact as Packed; field:
+/// Packed<bool>`) is therefore NOT recognized and the field silently falls back
+/// to a plain `Vec`. This is a proc-macro limitation — without type resolution
+/// the derive cannot map an arbitrary alias back to `Compact`. Users must keep
+/// the import names `Compact` / `CompactBool` (fully-qualified
+/// `::layout::Compact<T>` and `path::Compact<T>` still work, since the last
+/// segment is still `Compact`).
 fn compact_inner(ty: &syn::Type) -> Option<syn::Type> {
     let syn::Type::Path(type_path) = ty else {
         return None;
@@ -237,12 +238,12 @@ impl Input {
 
     /// True iff every field is a compact column (`Compact<T>` / `CompactBool`).
     ///
-    /// In that case the generated immutable `Ref<'a>` has no field that actually
-    /// references `'a` (compact fields are owning `Compact<T>` snapshots), so the
-    /// struct's lifetime parameter would be unused (E0392). Callers add a
-    /// `PhantomData<&'a ()>` marker to keep the lifetime structural. This only
-    /// affects all-compact structs, which do not compile today, so it breaks no
-    /// existing code.
+    /// In that case the generated immutable `Ref<'a>` has no field that
+    /// actually references `'a` (compact fields are owning `Compact<T>`
+    /// snapshots), so the struct's lifetime parameter would be unused
+    /// (E0392). Callers add a `PhantomData<&'a ()>` marker to keep the
+    /// lifetime structural. This only affects all-compact structs, which do
+    /// not compile today, so it breaks no existing code.
     pub(crate) fn ref_needs_lifetime_marker(&self) -> bool {
         !self.field_is_compact.is_empty()
             && self.field_is_compact.iter().all(Option::is_some)

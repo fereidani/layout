@@ -40,9 +40,13 @@ pub fn derive(input: &Input) -> TokenStream {
 
     let vec_fields_types = input
         .map_fields_nested_or(
-            |_, field_type, compact| if let Some(inner) = compact { names::vec_name_compact(inner) } else {
-                let t = names::vec_name(field_type);
-                quote! { #t }
+            |_, field_type, compact| {
+                if let Some(inner) = compact {
+                    names::vec_name_compact(inner)
+                } else {
+                    let t = names::vec_name(field_type);
+                    quote! { #t }
+                }
             },
             |_, field_type| quote! { ::layout::Column<#field_type> },
         )
@@ -95,9 +99,13 @@ pub fn derive(input: &Input) -> TokenStream {
 
     let drain_fields_types = input
         .map_fields_nested_or(
-            |_, field_type, compact| if let Some(inner) = compact { names::drain_name_compact(inner) } else {
-                let t = names::drain_name(field_type);
-                quote! { #t<'a> }
+            |_, field_type, compact| {
+                if let Some(inner) = compact {
+                    names::drain_name_compact(inner)
+                } else {
+                    let t = names::drain_name(field_type);
+                    quote! { #t<'a> }
+                }
             },
             |_, field_type| quote! { ::layout::Drain<'a, #field_type> },
         )

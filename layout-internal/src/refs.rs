@@ -56,9 +56,13 @@ pub fn derive(input: &Input) -> TokenStream {
 
     let ref_mut_fields_types = input
         .map_fields_nested_or(
-            |_, field_type, compact| if let Some(inner) = compact { names::ref_mut_name_compact(inner) } else {
-                let field_ptr_type = names::ref_mut_name(field_type);
-                quote! { #field_ptr_type<'a> }
+            |_, field_type, compact| {
+                if let Some(inner) = compact {
+                    names::ref_mut_name_compact(inner)
+                } else {
+                    let field_ptr_type = names::ref_mut_name(field_type);
+                    quote! { #field_ptr_type<'a> }
+                }
             },
             |_, field_type| quote! { &'a mut #field_type },
         )
@@ -108,7 +112,8 @@ pub fn derive(input: &Input) -> TokenStream {
         .collect::<Vec<_>>();
 
     // When every field is compact, the immutable `Ref<'a>` would otherwise have
-    // an unused lifetime; add a hidden PhantomData marker to keep it structural.
+    // an unused lifetime; add a hidden PhantomData marker to keep it
+    // structural.
     let ref_marker_field: TokenStream = if input.ref_needs_lifetime_marker() {
         quote! {
             #[doc(hidden)]

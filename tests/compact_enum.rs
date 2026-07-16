@@ -9,7 +9,8 @@ enum Kind {
     Blue,
 }
 
-/// Custom (non-contiguous) discriminants within 4 bits (max 15) -> 4-bit storage.
+/// Custom (non-contiguous) discriminants within 4 bits (max 15) -> 4-bit
+/// storage.
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, CompactRepr)]
 enum Spaced {

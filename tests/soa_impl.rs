@@ -524,9 +524,9 @@ fn compact_bool_mixed_fields() {
 
 #[derive(Debug, Clone, PartialEq, SOA)]
 pub struct Sample {
-    pub a: f64,        // Copy field
-    pub name: String,  // non-Copy field
-    pub flag: bool,    // bool field
+    pub a: f64,       // Copy field
+    pub name: String, // non-Copy field
+    pub flag: bool,   // bool field
 }
 
 impl Sample {

@@ -31,7 +31,9 @@ fn serde_test() -> Result<(), serde_json::Error> {
 // A fieldless enum opts into compact storage via CompactRepr; it must also be
 // (de)serializable so Compact<Kind> and CompactVec<Kind> can round-trip.
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, CompactRepr, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, CompactRepr, Serialize, Deserialize,
+)]
 pub enum Kind {
     Player,
     Enemy,
