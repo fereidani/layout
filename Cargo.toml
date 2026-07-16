@@ -2,7 +2,7 @@
 name = "layout"
 version = "0.0.1"
 edition = "2021"
-rust-version = "1.65"
+rust-version = "1.71"
 license = "MIT/Apache-2.0"
 readme = "README.md"
 description = "Optimized memory layout using struct of array, Data-oriented design in Rust, DOD SOA"
@@ -15,21 +15,22 @@ keywords = ["soa", "dod", "data-oriented", "struct-of-array", "performance"]
 [features]
 default = ["std"]
 std = []
+# Enable Serialize/Deserialize on Compact<T>, CompactVec<T> and the generated
+# Vec when the user requests `#[layout(Serialize, Deserialize)]`.
+serde = ["dep:serde"]
 
 [workspace]
 members = ["layout-internal"]
 
 [dependencies]
-bit-vec = { version = "0.8.0", default-features = false }
-branches = { version = "0.3.0", default-features = false }
+branches = { version = "0.4.4", default-features = false }
 layout_internal = { path = "./layout-internal", version = "0.0.1" }
-permutation = "0.4.1"
+serde = { version = "1", optional = true, default-features = false, features = ["alloc", "derive"] }
 
 [dev-dependencies]
 bencher = "0.1"
-serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-itertools = "0.14.0"
+itertools = "0.15.0"
 
 [build-dependencies]
 rustc_version = "0.4"
@@ -38,10 +39,13 @@ rustc_version = "0.4"
 name = "soa"
 harness = false
 
+[[bench]]
+name = "game"
+harness = false
+
 [profile.bench]
 opt-level = 3
 lto = "thin"
 codegen-units = 1
-rpath = true
 debug = false
 incremental = false
