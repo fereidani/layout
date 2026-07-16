@@ -662,3 +662,27 @@ fn ref_mut_bare_field_value_positions() {
     assert_eq!(vec.index_mut(0).classify_a_mut(), "negative");
     assert_eq!(vec.index_mut(1).classify_a_mut(), "zero");
 }
+
+// ---------------------------------------------------------------------------
+// Regression: `&self` methods must be reachable on `RefMut` too — a mutable
+// borrow can do everything an immutable one can (mirrors `&mut T` calling
+// `&self` methods). Covers both a Copy field and a non-Copy field.
+// ---------------------------------------------------------------------------
+#[test]
+fn refmut_can_call_ref_methods() {
+    let mut vec = ParticleVec::new();
+    vec.push(Particle::new("Na".into(), 23.0));
+
+    let m = vec.index_mut(0);
+    // `&self` method reading a Copy field (mass).
+    assert!((m.kinetic_energy(2.0) - 46.0).abs() < f64::EPSILON);
+    // `&self` method calling through a non-Copy field (name: String).
+    assert_eq!(m.name_len(), 2);
+
+    // `&self` method whose body reads `self.field` inside a method-call
+    // receiver — `(self.x * self.x + self.y * self.y).sqrt()`. The operand
+    // reads must be wrapped so this compiles on RefMut too.
+    let mut v2 = Vec2Vec::new();
+    v2.push(Vec2 { x: 3.0, y: 4.0 });
+    assert_eq!(v2.index_mut(0).magnitude(), 5.0);
+}

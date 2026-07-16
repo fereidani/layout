@@ -230,13 +230,17 @@ impl VisitMut for SelfFieldTransformer<'_> {
         &mut self,
         expr: &mut syn::ExprMethodCall,
     ) {
-        // The method receiver is a place and auto-derefs, so it must NOT be
-        // wrapped (e.g. `self.faction.get()` on a `Compact<Faction>` field,
-        // or `self.name.clone()` on a `String` field). Arguments wrap normally.
-        let prev = self.suppress;
-        self.suppress = true;
-        self.visit_expr_mut(&mut expr.receiver);
-        self.suppress = prev;
+        // A direct `self.field` receiver is a place that auto-derefs (e.g.
+        // `self.flag.get()` on a `Compact<T>`, or `self.name.clone()` on a
+        // `String`), so it must NOT be wrapped — skip it. Any other receiver is
+        // a value expression whose nested `self.field` reads are operands, and
+        // those DO need wrapping: otherwise on `RefMut` they stay `&mut T` and
+        // arithmetic such as `(self.x * self.x).sqrt()` fails to compile
+        // (`&mut T * &mut T` is not implemented, unlike `&T * &T`). Recurse
+        // normally (wrapping enabled) into every non-direct-field receiver.
+        if !self.is_known_field(&expr.receiver) {
+            self.visit_expr_mut(&mut expr.receiver);
+        }
 
         for arg in &mut expr.args {
             self.visit_expr_mut(arg);
@@ -353,7 +357,15 @@ fn generate_ref_mut_impl(
 
     for item in &item_impl.items {
         if let syn::ImplItem::Fn(method) = item {
-            if is_mut_self_method(method) && !returns_self(method) && !mentions_self(method) {
+            // RefMut gets both `&mut self` and `&self` methods: a mutable
+            // borrow can do everything an immutable one can (mirrors `&mut T`
+            // being usable for `&self` calls). A `&self` method does no field
+            // assignments, so the `is_ref_mut` transform (which only diverges
+            // on assignment LHS) produces the same result as for `Ref`.
+            if (is_mut_self_method(method) || is_ref_self_method(method))
+                && !returns_self(method)
+                && !mentions_self(method)
+            {
                 let mut cloned = method.clone();
                 let mut visitor = SelfFieldTransformer {
                     field_names,
