@@ -17,6 +17,19 @@ use alloc::vec::Vec;
 /// Valid widths are `1`, `2`, `4`, `8` and `16` (each divides `usize::BITS`
 /// evenly). Values are truncated to `BITS` bits on insertion.
 ///
+/// Any other width is rejected at build time:
+///
+/// ```compile_fail
+/// // `BITS = 0` would divide by zero on the first access.
+/// let a = layout::bitpack::PackedArray::<0>::new();
+/// ```
+///
+/// ```compile_fail
+/// // `BITS = 64` would overflow the value mask and truncate every
+/// // element to zero.
+/// let a = layout::bitpack::PackedArray::<64>::new();
+/// ```
+///
 /// This type is `no_std` compatible (it only relies on `alloc::vec::Vec`).
 #[derive(Debug)]
 pub struct PackedArray<const BITS: u32> {
@@ -34,8 +47,8 @@ impl<const BITS: u32> PackedArray<BITS> {
     /// Bit mask covering the low `BITS` bits of a word.
     #[inline(always)]
     fn mask() -> usize {
-        // BITS is one of {1, 4, 8, 16}, all strictly less than usize::BITS,
-        // so `1 << BITS` never overflows.
+        // `WIDTH_OK` guarantees BITS is one of {1, 2, 4, 8, 16}, all strictly
+        // less than usize::BITS, so `1 << BITS` never overflows.
         (1usize << BITS) - 1
     }
 
@@ -61,18 +74,19 @@ impl<const BITS: u32> PackedArray<BITS> {
         }
     }
 
-    #[inline]
-    fn check_width() {
-        debug_assert!(
-            BITS != 0 && usize::BITS % BITS == 0,
-            "PackedArray BITS must divide usize::BITS evenly (1, 2, 4, 8 or 16)"
-        );
-    }
+    /// Evaluated from every constructor, so an unsupported width fails to
+    /// build instead of dividing by zero (`BITS = 0`) or overflowing the
+    /// mask shift and silently truncating every value (`BITS = usize::BITS`)
+    /// in release.
+    const WIDTH_OK: () = assert!(
+        BITS == 1 || BITS == 2 || BITS == 4 || BITS == 8 || BITS == 16,
+        "PackedArray BITS must be 1, 2, 4, 8 or 16"
+    );
 
     /// Create an empty array.
     #[inline]
     pub fn new() -> Self {
-        Self::check_width();
+        let () = Self::WIDTH_OK;
         Self {
             words: Vec::new(),
             len: 0,
@@ -82,7 +96,7 @@ impl<const BITS: u32> PackedArray<BITS> {
     /// Create an empty array with capacity for at least `capacity` elements.
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
-        Self::check_width();
+        let () = Self::WIDTH_OK;
         Self {
             words: Vec::with_capacity(Self::words_for(capacity)),
             len: 0,
