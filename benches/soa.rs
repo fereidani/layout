@@ -280,7 +280,9 @@ fn aos_creature_count_alive_1m(bencher: &mut Bencher) {
     let vec = core::hint::black_box(Creature::aos_vec(1_000_000));
     bencher.iter(|| {
         vec.iter()
-            .filter(|c| c.is_alive && c.health > 50 && c.ctype == CreatureType::Goblin)
+            .filter(|c| {
+                c.is_alive && c.health > 50 && c.ctype == CreatureType::Goblin
+            })
             .count()
     })
 }
@@ -289,13 +291,17 @@ fn soa_creature_count_alive_1m(bencher: &mut Bencher) {
     let vec = core::hint::black_box(Creature::soa_vec(1_000_000));
     bencher.iter(|| {
         vec.iter()
-            .filter(|c| *c.is_alive && *c.health > 50 && *c.ctype == CreatureType::Goblin)
+            .filter(|c| {
+                *c.is_alive
+                    && *c.health > 50
+                    && *c.ctype == CreatureType::Goblin
+            })
             .count()
     })
 }
 
-// DO NOT USE THIS IN STYLE YOUR PROGRAMS, IT IS HERE TO BENCHMARK UNSAFE ACCESS VS SAFE ACCESS
-//  TO UNDERSTAND BOUND CHECKING AND ABSTRACTION OVERHEAD
+// DO NOT USE THIS IN STYLE YOUR PROGRAMS, IT IS HERE TO BENCHMARK UNSAFE ACCESS
+// VS SAFE ACCESS  TO UNDERSTAND BOUND CHECKING AND ABSTRACTION OVERHEAD
 fn soa_creature_count_alive_1m_unsafe(bencher: &mut Bencher) {
     let vec = core::hint::black_box(Creature::soa_vec(1_000_000));
     bencher.iter(|| {
