@@ -366,10 +366,10 @@ impl<T: CompactRepr> Clone for CompactVec<T> {
 
 impl<T: CompactRepr + PartialEq> PartialEq for CompactVec<T> {
     fn eq(&self, other: &Self) -> bool {
+        // `encode` is injective, so raw-lane equality is equivalent to decoded
+        // equality and skips the per-element decode on both sides.
         self.len() == other.len()
-            && (0..self.len()).all(|i| {
-                T::decode(self.inner.get(i)) == T::decode(other.inner.get(i))
-            })
+            && (0..self.len()).all(|i| self.inner.get(i) == other.inner.get(i))
     }
 }
 
@@ -379,7 +379,7 @@ impl<T: CompactRepr + core::hash::Hash> core::hash::Hash for CompactVec<T> {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         self.len().hash(state);
         for i in 0..self.len() {
-            T::decode(self.inner.get(i)).hash(state);
+            self.inner.get(i).hash(state);
         }
     }
 }
@@ -1171,7 +1171,17 @@ impl<T: CompactRepr + core::fmt::Debug> core::fmt::Debug
 
 impl<'a, T: CompactRepr + PartialEq> PartialEq for CompactSlice<'a, T> {
     fn eq(&self, other: &Self) -> bool {
-        self.len == other.len && self.iter().eq(other.iter())
+        if self.len != other.len {
+            return false;
+        }
+        // Raw-lane equality is equivalent to decoded equality (encode is
+        // injective) and skips the per-element decode.
+        // SAFETY: each slice's `packed` is a valid `Store<T>` for its lifetime,
+        // and `start + i < start + len`, so every `get` is in bounds. Shared
+        // refs are fine even when the slices overlap.
+        let a = unsafe { &*self.packed };
+        let b = unsafe { &*other.packed };
+        (0..self.len).all(|i| a.get(self.start + i) == b.get(other.start + i))
     }
 }
 
@@ -1182,8 +1192,11 @@ impl<'a, T: CompactRepr + core::hash::Hash> core::hash::Hash
 {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         self.len.hash(state);
-        for val in self.iter() {
-            val.hash(state);
+        // SAFETY: `packed` is a valid `Store<T>` for the slice's lifetime, and
+        // `start + i < start + len`.
+        let a = unsafe { &*self.packed };
+        for i in 0..self.len {
+            a.get(self.start + i).hash(state);
         }
     }
 }
@@ -1630,7 +1643,15 @@ impl<T: CompactRepr + core::fmt::Debug> core::fmt::Debug
 
 impl<'a, T: CompactRepr + PartialEq> PartialEq for CompactSliceMut<'a, T> {
     fn eq(&self, other: &Self) -> bool {
-        self.len == other.len && self.iter().eq(other.iter())
+        if self.len != other.len {
+            return false;
+        }
+        // SAFETY: each slice's `packed` is a valid `Store<T>` for its lifetime,
+        // and `start + i < start + len`. `eq` only reads, so shared refs are
+        // fine even though the pointers are `*mut`.
+        let a = unsafe { &*self.packed };
+        let b = unsafe { &*other.packed };
+        (0..self.len).all(|i| a.get(self.start + i) == b.get(other.start + i))
     }
 }
 
@@ -1641,8 +1662,11 @@ impl<'a, T: CompactRepr + core::hash::Hash> core::hash::Hash
 {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         self.len.hash(state);
-        for val in self.iter() {
-            val.hash(state);
+        // SAFETY: `packed` is a valid `Store<T>` for the slice's lifetime, and
+        // `start + i < start + len`.
+        let a = unsafe { &*self.packed };
+        for i in 0..self.len {
+            a.get(self.start + i).hash(state);
         }
     }
 }
