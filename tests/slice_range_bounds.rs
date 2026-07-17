@@ -105,3 +105,32 @@ fn excluded_last_index_is_empty() {
     let sub = SoAVec::slice(&v, (Bound::Excluded(4usize), Bound::Unbounded));
     assert!(sub.is_empty());
 }
+
+// An inclusive end past the last valid index must panic, like `slice[a..=b]`.
+// The end-bound decoder previously clamped it to `len`.
+
+#[test]
+#[should_panic]
+fn included_end_out_of_bounds_panics() {
+    let v = filled(); // len 5
+    let _ = SoAVec::slice(&v, (Bound::Unbounded, Bound::Included(10usize)));
+}
+
+#[test]
+#[should_panic]
+fn included_end_out_of_bounds_panics_mut() {
+    let mut v = filled(); // len 5
+    let _ =
+        SoAVec::slice_mut(&mut v, (Bound::Unbounded, Bound::Included(10usize)));
+}
+
+#[test]
+#[should_panic]
+fn included_end_out_of_bounds_panics_slice() {
+    let mut v = filled();
+    let mut s = v.as_mut_slice();
+    let _ = SoASliceMut::slice_mut(
+        &mut s,
+        (Bound::Unbounded, Bound::Included(10usize)),
+    );
+}
