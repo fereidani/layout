@@ -137,11 +137,11 @@ pub fn derive(input: &Input) -> TokenStream {
         impl<'a> DoubleEndedIterator for #iter_name<'a> {
             #[inline]
             fn next_back(&mut self) -> Option<#ref_name<'a>> {
-                self.0.next_back().and_then(|#iter_pat|
-                    Some(#ref_name{
+                self.0.next_back().map(|#iter_pat|
+                    #ref_name{
                         #(#fields_names,)*
                         #ref_marker_init
-                    })
+                    }
                 )
             }
         }
@@ -206,10 +206,10 @@ pub fn derive(input: &Input) -> TokenStream {
         impl<'a> DoubleEndedIterator for #iter_mut_name<'a> {
             #[inline]
             fn next_back(&mut self) -> Option<#ref_mut_name<'a>> {
-                self.0.next_back().and_then(|#iter_pat|
-                    Some(#ref_mut_name{
+                self.0.next_back().map(|#iter_pat|
+                    #ref_mut_name{
                         #(#fields_names,)*
-                    })
+                    }
                 )
             }
         }
