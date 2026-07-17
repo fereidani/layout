@@ -1593,10 +1593,22 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
     where
         F: FnMut(Compact<T>, Compact<T>) -> core::cmp::Ordering,
     {
-        let mut argsort: Vec<usize> = (0..self.len).collect();
-        argsort.sort_by(|j, k| f(self.index(*j), self.index(*k)));
-        let dest = crate::__invert_permutation(&argsort);
-        self.__private_apply_permutation(&dest);
+        let len = self.len;
+        if len <= 1 {
+            return;
+        }
+        let mut argsort: Vec<usize> = (0..len).collect();
+        // SAFETY: `self.packed` is a valid `Store<T>` for the slice's lifetime;
+        // `*j` and `*k` are in `0..len` by construction.
+        {
+            let pa = unsafe { &*self.packed };
+            argsort.sort_by(|j, k| {
+                let a = Compact(T::decode(pa.get(self.start + *j)));
+                let b = Compact(T::decode(pa.get(self.start + *k)));
+                f(a, b)
+            });
+        }
+        self.__sort_apply(&argsort);
     }
 
     pub fn sort_by_key<F, K>(&mut self, mut f: F)
@@ -1604,10 +1616,20 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
         F: FnMut(Compact<T>) -> K,
         K: Ord,
     {
-        let mut argsort: Vec<usize> = (0..self.len).collect();
-        argsort.sort_by_key(|i| f(self.index(*i)));
-        let dest = crate::__invert_permutation(&argsort);
-        self.__private_apply_permutation(&dest);
+        let len = self.len;
+        if len <= 1 {
+            return;
+        }
+        let mut argsort: Vec<usize> = (0..len).collect();
+        // SAFETY: `self.packed` is a valid `Store<T>` for the slice's lifetime.
+        {
+            let pa = unsafe { &*self.packed };
+            argsort.sort_by_key(|i| {
+                let v = Compact(T::decode(pa.get(self.start + *i)));
+                f(v)
+            });
+        }
+        self.__sort_apply(&argsort);
     }
 
     pub fn sort(&mut self)
@@ -1615,6 +1637,25 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
         T: Ord,
     {
         self.sort_by(|a, b| a.0.cmp(&b.0));
+    }
+
+    /// Gather rows into a fresh store in `argsort` order and write them back.
+    /// Compact values are `Copy`, so this needs none of the permutation
+    /// inversion and cycle-walking that `apply_index` uses for plain columns.
+    fn __sort_apply(&mut self, argsort: &[usize]) {
+        let len = self.len;
+        // SAFETY: `self.packed` is valid for the slice's lifetime; every
+        // `argsort[i] < len`. `pa` is dropped before the mutable `pam` is
+        // taken.
+        let pa = unsafe { &*self.packed };
+        let mut sorted = Store::<T>::with_capacity(len);
+        for &src in argsort {
+            sorted.push(pa.get(self.start + src));
+        }
+        let pam = unsafe { &mut *self.packed };
+        for i in 0..len {
+            pam.set(self.start + i, sorted.get(i));
+        }
     }
 }
 
