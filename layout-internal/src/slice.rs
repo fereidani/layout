@@ -1046,6 +1046,11 @@ pub fn derive_mut(input: &Input) -> TokenStream {
                 /// the compacted elements occupy `[0, return)` and the slots in
                 /// `[return, len)` still hold stale values. Truncate the owning
                 /// `Vec` to the returned length to drop them.
+                ///
+                /// As in `std`, the predicate receives the two elements in
+                /// opposite order from their order in the slice: if
+                /// `same_bucket(a, b)` returns `true`, `a` (the later element)
+                /// is the one dropped from the compacted prefix.
                 pub fn dedup_by<F>(&mut self, mut same_bucket: F) -> usize
                 where
                     F: FnMut(#ref_name, #ref_name) -> bool,
@@ -1056,7 +1061,7 @@ pub fn derive_mut(input: &Input) -> TokenStream {
                     }
                     let mut write = 1;
                     for read in 1..len {
-                        if !same_bucket(self.index(write - 1), self.index(read)) {
+                        if !same_bucket(self.index(read), self.index(write - 1)) {
                             if write != read {
                                 self.swap(write, read);
                             }
