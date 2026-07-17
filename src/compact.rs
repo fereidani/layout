@@ -585,8 +585,15 @@ impl<T: CompactRepr> CompactVec<T> {
     pub fn extend_from_slice(&mut self, other: CompactSlice<'_, T>) {
         let n = other.len();
         self.inner.reserve(n);
-        for val in other {
-            self.inner.push(T::encode(val.0));
+        // The stored lanes are already encoded; copy them directly instead of
+        // decoding and re-encoding each element.
+        // SAFETY: `other.packed` is a valid `Store<T>` for `other`'s lifetime,
+        // `other.start + i` is in bounds, and `src` aliases the source store,
+        // not `self`.
+        let src: &Store<T> = unsafe { &*other.packed };
+        let start = other.start;
+        for i in 0..n {
+            self.inner.push(src.get(start + i));
         }
     }
 
