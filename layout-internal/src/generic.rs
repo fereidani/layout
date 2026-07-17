@@ -31,7 +31,8 @@ pub fn derive_slice(input: &Input) -> TokenStream {
 
             fn slice<'c, 'b: 'c>(&'c self, index: impl core::ops::RangeBounds<usize>) -> Self::Slice<'c> where Self: 'b {
                 let start = match index.start_bound() {
-                    core::ops::Bound::Included(i) | core::ops::Bound::Excluded(i) => *i,
+                    core::ops::Bound::Included(i) => *i,
+                    core::ops::Bound::Excluded(i) => i.saturating_add(1),
                     core::ops::Bound::Unbounded => 0,
                 };
                 let n = self.len();
@@ -106,7 +107,8 @@ pub fn derive_slice_mut(input: &Input) -> TokenStream {
             #[inline]
             fn slice<'c, 'b: 'c>(&'c self, index: impl core::ops::RangeBounds<usize>) -> Self::Slice<'c> where Self: 'b {
                 let start = match index.start_bound() {
-                    core::ops::Bound::Included(i) | core::ops::Bound::Excluded(i) => *i,
+                    core::ops::Bound::Included(i) => *i,
+                    core::ops::Bound::Excluded(i) => i.saturating_add(1),
                     core::ops::Bound::Unbounded => 0,
                 };
                 let n = self.len();
@@ -141,7 +143,8 @@ pub fn derive_slice_mut(input: &Input) -> TokenStream {
             #[inline]
             fn slice_mut<'c>(&'c mut self, index: impl core::ops::RangeBounds<usize>) -> Self::SliceMut<'c> {
                 let start = match index.start_bound() {
-                    core::ops::Bound::Included(i) | core::ops::Bound::Excluded(i) => *i,
+                    core::ops::Bound::Included(i) => *i,
+                    core::ops::Bound::Excluded(i) => i.saturating_add(1),
                     core::ops::Bound::Unbounded => 0,
                 };
                 let n = self.len();
@@ -232,7 +235,8 @@ pub fn derive_vec(input: &Input) -> TokenStream {
             #[inline]
             fn slice<'c, 'a: 'c>(&'c self, index: impl core::ops::RangeBounds<usize>) -> Self::Slice<'c> where Self: 'a {
                 let start = match index.start_bound() {
-                    core::ops::Bound::Included(i) | core::ops::Bound::Excluded(i) => *i,
+                    core::ops::Bound::Included(i) => *i,
+                    core::ops::Bound::Excluded(i) => i.saturating_add(1),
                     core::ops::Bound::Unbounded => 0,
                 };
                 let n = self.len();
@@ -267,7 +271,8 @@ pub fn derive_vec(input: &Input) -> TokenStream {
             #[inline]
             fn slice_mut<'c>(&'c mut self, index: impl core::ops::RangeBounds<usize>) -> Self::SliceMut<'c> {
                 let start = match index.start_bound() {
-                    core::ops::Bound::Included(i) | core::ops::Bound::Excluded(i) => *i,
+                    core::ops::Bound::Included(i) => *i,
+                    core::ops::Bound::Excluded(i) => i.saturating_add(1),
                     core::ops::Bound::Unbounded => 0,
                 };
                 let n = self.len();
