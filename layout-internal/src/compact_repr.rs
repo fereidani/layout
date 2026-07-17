@@ -118,6 +118,9 @@ pub fn derive_compact_repr(input: &DeriveInput) -> TokenStream {
         .map(|d| proc_macro2::Literal::usize_unsuffixed(*d as usize))
         .collect();
     let storage_ty = quote! { ::layout::bitpack::PackedArray<#bits> };
+    // First variant, used as the defensive fallback when `decode` receives a
+    // value that is not a valid discriminant.
+    let first_ident = &idents[0];
 
     quote! {
         impl ::layout::CompactRepr for #name {
@@ -139,12 +142,11 @@ pub fn derive_compact_repr(input: &DeriveInput) -> TokenStream {
                 );
                 match raw {
                     #( #discs => Self::#idents, )*
-                    #[allow(unreachable_patterns)]
-                    _ => unreachable!(
-                        "invalid compact discriminant for {}: {}",
-                        stringify!(#name),
-                        raw
-                    ),
+                    // Invalid discriminants reach the catch-all only through
+                    // unsafe construction (`from_raw_parts`) or bit corruption.
+                    // Map them to the first variant instead of panicking, so the
+                    // safe `decode` entry point is total.
+                    _ => Self::#first_ident,
                 }
             }
         }

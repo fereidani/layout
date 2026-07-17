@@ -138,3 +138,18 @@ fn compact_enum_storage_width() {
     assert_eq!(<Kind as CompactRepr>::BITS, 2);
     assert_eq!(<Spaced as CompactRepr>::BITS, 4);
 }
+
+// `decode` is safe and public: invalid discriminants (only reachable via
+// unsafe construction or bit corruption) map to the first variant instead of
+// panicking. Debug builds still fail fast via `debug_assert!`.
+#[cfg(not(debug_assertions))]
+#[test]
+fn decode_invalid_falls_back_to_first_variant() {
+    assert_eq!(Kind::decode(3), Kind::Red);
+    assert_eq!(Kind::decode(99), Kind::Red);
+    assert_eq!(Spaced::decode(5), Spaced::Low);
+    // Valid discriminants are unaffected.
+    assert_eq!(Kind::decode(0), Kind::Red);
+    assert_eq!(Kind::decode(1), Kind::Green);
+    assert_eq!(Kind::decode(2), Kind::Blue);
+}
