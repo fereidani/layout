@@ -561,9 +561,14 @@ pub fn derive(input: &Input) -> TokenStream {
         #[allow(clippy::drop_non_drop)]
         impl Drop for #vec_name {
             fn drop(&mut self) {
-                while let Some(value) = self.pop() {
-                    ::core::mem::drop(value);
+                if !::core::mem::needs_drop::<#name>() {
+                    // Trivially droppable: the column vectors free their own
+                    // buffers.
+                    return;
                 }
+                // Drop in insertion order, matching `Vec<T>`. Draining moves
+                // each row out of the columns so their own `Drop` reaps nothing.
+                for _ in self.drain(..) {}
             }
         }
     };
