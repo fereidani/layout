@@ -1460,7 +1460,27 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
 
     pub fn __private_apply_permutation(&mut self, dest: &[usize]) {
         let len = self.len;
+        // The cycle-walk below indexes the packed store at `self.start + d`
+        // for every `d` in `dest`, so every precondition must hold before it
+        // starts: a wrong-length or non-permutation `dest` would otherwise
+        // read and write packed lanes outside the slice bounds (corrupting
+        // neighbouring elements) or walk a cycle that never closes. Validate
+        // eagerly; the `visited` bitmap is reused for the walk afterwards.
+        assert!(
+            dest.len() == len,
+            "permutation length {} does not match slice length {len}",
+            dest.len()
+        );
         let mut visited = vec![false; len];
+        for &d in dest {
+            assert!(d < len, "index {d} out of bounds for length {len}");
+            assert!(
+                !visited[d],
+                "duplicate index {d}: indices must form a permutation"
+            );
+            visited[d] = true;
+        }
+        visited.fill(false);
         unsafe {
             let pa = &mut *self.packed;
             for start in 0..len {
