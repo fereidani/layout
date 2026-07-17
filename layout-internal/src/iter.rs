@@ -322,6 +322,10 @@ pub fn derive(input: &Input) -> TokenStream {
 
         impl Extend<#name> for #vec_name {
             fn extend<I: IntoIterator<Item = #name>>(&mut self, iter: I) {
+                let mut iter = iter.into_iter();
+                let (lower, upper) = iter.size_hint();
+                // Avoid log(n) reallocations across every column.
+                self.reserve(upper.unwrap_or(lower));
                 for item in iter {
                     self.push(item)
                 }
