@@ -5,7 +5,7 @@
 //! `SliceMut::index_mut` dispatch through, plus range-based slicing and drain.
 //! Run with `cargo test --release --test compact_index_bounds` to exercise the
 //! release-only path.
-use layout::{Compact, CompactBool, CompactVec, SOA};
+use layout::{Compact, CompactBool, CompactVec, SoAIndex, SoAIndexMut, SOA};
 
 #[derive(Clone, SOA)]
 struct Row {
@@ -98,4 +98,30 @@ fn compactvec_splice_oob_range_is_rejected() {
     v.push(Compact(true)); // len == 1
     let _: Vec<Compact<bool>> =
         v.splice(0..5, core::iter::empty::<Compact<bool>>());
+}
+
+// `..=usize::MAX` is out of bounds and must panic. Previously the
+// `RangeToInclusive` impl computed `self.end + 1`, which overflowed in debug
+// and silently wrapped to an empty slice in release. Run under `--release`.
+// UFCS reaches the trait impl; `CompactSlice` also has an inherent
+// `index(usize)`.
+#[test]
+#[should_panic]
+fn slice_index_range_to_inclusive_max_panics() {
+    let v = one();
+    let _ = SoAIndex::index(..=usize::MAX, v.flag.as_slice());
+}
+
+#[test]
+#[should_panic]
+fn slice_index_mut_range_to_inclusive_max_panics() {
+    let mut v = one();
+    let _ = SoAIndexMut::index_mut(..=usize::MAX, v.flag.as_mut_slice());
+}
+
+#[test]
+fn slice_index_inclusive_in_bounds() {
+    let v = one();
+    let s = SoAIndex::index(0..=0, v.flag.as_slice());
+    assert_eq!(s.len(), 1);
 }

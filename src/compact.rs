@@ -2647,16 +2647,16 @@ impl<'a, T: CompactRepr> crate::SoAIndex<CompactSlice<'a, T>>
         if self.end == usize::MAX {
             None
         } else {
-            crate::SoAIndex::get(0..self.end + 1, s)
+            crate::SoAIndex::get(0..self.end.saturating_add(1), s)
         }
     }
     #[inline]
     unsafe fn get_unchecked(self, s: CompactSlice<'a, T>) -> Self::RefOutput {
-        crate::SoAIndex::get_unchecked(0..self.end + 1, s)
+        crate::SoAIndex::get_unchecked(0..self.end.saturating_add(1), s)
     }
     #[inline]
     fn index(self, s: CompactSlice<'a, T>) -> Self::RefOutput {
-        crate::SoAIndex::index(0..self.end + 1, s)
+        crate::SoAIndex::index(0..self.end.saturating_add(1), s)
     }
 }
 
@@ -2669,7 +2669,7 @@ impl<'a, T: CompactRepr> crate::SoAIndexMut<CompactSliceMut<'a, T>>
         if self.end == usize::MAX {
             None
         } else {
-            crate::SoAIndexMut::get_mut(0..self.end + 1, s)
+            crate::SoAIndexMut::get_mut(0..self.end.saturating_add(1), s)
         }
     }
     #[inline]
@@ -2677,10 +2677,10 @@ impl<'a, T: CompactRepr> crate::SoAIndexMut<CompactSliceMut<'a, T>>
         self,
         s: CompactSliceMut<'a, T>,
     ) -> Self::MutOutput {
-        crate::SoAIndexMut::get_unchecked_mut(0..self.end + 1, s)
+        crate::SoAIndexMut::get_unchecked_mut(0..self.end.saturating_add(1), s)
     }
     #[inline]
     fn index_mut(self, s: CompactSliceMut<'a, T>) -> Self::MutOutput {
-        crate::SoAIndexMut::index_mut(0..self.end + 1, s)
+        crate::SoAIndexMut::index_mut(0..self.end.saturating_add(1), s)
     }
 }
