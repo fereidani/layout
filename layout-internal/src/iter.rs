@@ -398,10 +398,11 @@ pub fn derive(input: &Input) -> TokenStream {
 
         impl Extend<#name> for #vec_name {
             fn extend<I: IntoIterator<Item = #name>>(&mut self, iter: I) {
-                let mut iter = iter.into_iter();
-                let (lower, upper) = iter.size_hint();
-                // Avoid log(n) reallocations across every column.
-                self.reserve(upper.unwrap_or(lower));
+                let iter = iter.into_iter();
+                // Reserve the lower bound, like `std` and this crate's
+                // `FromIterator`: a filter's upper bound is the source
+                // length, so reserving it over-allocates every column.
+                self.reserve(iter.size_hint().0);
                 for item in iter {
                     self.push(item)
                 }
