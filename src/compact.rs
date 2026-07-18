@@ -466,16 +466,13 @@ impl<T: CompactRepr> CompactVec<T> {
             index,
             self.len()
         );
+        // Grow by one (the pushed value is immediately overwritten by the
+        // shift), then move the tail up one lane word-at-a-time.
         self.push(Compact::new(element.0));
-        // SAFETY: every touched lane is `< self.len()` (`index <= len` was
-        // asserted above and the column just grew by one).
-        unsafe {
-            for i in (index + 1..self.len()).rev() {
-                let v = self.inner.get_unchecked(i - 1);
-                self.inner.set_unchecked(i, v);
-            }
-            self.inner.set_unchecked(index, T::encode(element.0));
-        }
+        let len = self.len();
+        self.inner.copy_lanes(index, index + 1, len - 1 - index);
+        // SAFETY: `index < len` (the column just grew past `index <= len`).
+        unsafe { self.inner.set_unchecked(index, T::encode(element.0)) };
     }
 
     pub fn remove(&mut self, index: usize) -> Compact<T> {
@@ -485,16 +482,12 @@ impl<T: CompactRepr> CompactVec<T> {
             self.len(),
             index
         );
-        // SAFETY: `index < self.len()` was asserted above, and every lane
-        // touched by the shift is `< self.len()`.
-        let val = unsafe {
-            let val = Compact(T::decode(self.inner.get_unchecked(index)));
-            for i in index..self.len() - 1 {
-                let v = self.inner.get_unchecked(i + 1);
-                self.inner.set_unchecked(i, v);
-            }
-            val
-        };
+        // SAFETY: `index < self.len()` was asserted above.
+        let val =
+            unsafe { Compact(T::decode(self.inner.get_unchecked(index))) };
+        // Move the tail down one lane word-at-a-time, then drop the last.
+        let len = self.len();
+        self.inner.copy_lanes(index + 1, index, len - 1 - index);
         self.inner.pop();
         val
     }
@@ -799,10 +792,7 @@ impl<T: CompactRepr> CompactVec<T> {
             let shift_from = end;
             let shift_to = start + insert_count;
             let tail_len = self.inner.len() - shift_from;
-            for i in 0..tail_len {
-                let v = self.inner.get(shift_from + i);
-                self.inner.set(shift_to + i, v);
-            }
+            self.inner.copy_lanes(shift_from, shift_to, tail_len);
             for _ in 0..remove_count - insert_count {
                 self.inner.pop();
             }
@@ -813,10 +803,7 @@ impl<T: CompactRepr> CompactVec<T> {
             let shift_from = start + remove_count;
             let shift_to = start + insert_count;
             let tail_len = self.inner.len() - shift_to;
-            for i in (0..tail_len).rev() {
-                let v = self.inner.get(shift_from + i);
-                self.inner.set(shift_to + i, v);
-            }
+            self.inner.copy_lanes(shift_from, shift_to, tail_len);
             for (i, val) in replacement.iter().enumerate() {
                 self.inner.set(start + i, T::encode(val.0));
             }
@@ -2342,12 +2329,11 @@ impl<T: CompactRepr> Drop for CompactDrain<'_, T> {
         // alive while the length was lowered (`set_len` never trims words).
         unsafe {
             self.packed.set_len(self.old_len);
-            if drain_len > 0 {
-                for i in 0..tail {
-                    let v = self.packed.get_unchecked(self.drain_end + i);
-                    self.packed.set_unchecked(self.drain_start + i, v);
-                }
-            }
+        }
+        if drain_len > 0 {
+            // Word-level tail shift over the drained gap.
+            self.packed
+                .copy_lanes(self.drain_end, self.drain_start, tail);
         }
         self.packed.truncate(self.old_len - drain_len);
     }

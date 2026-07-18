@@ -166,6 +166,26 @@ fn sort_by_key_mass(b: &mut Bencher) {
     });
 }
 
+// --- mid-vector insert/remove (word-level lane shifts) vs Vec<bool> ---
+
+fn compact_insert_remove_mid(b: &mut Bencher) {
+    let base = build_compact_bools(N, |i| i % 3 == 0);
+    b.iter(|| {
+        let mut v = base.clone();
+        v.insert(N / 2, layout::Compact::new(true));
+        black_box(v.remove(N / 4))
+    });
+}
+
+fn plain_bool_insert_remove_mid(b: &mut Bencher) {
+    let base: Vec<bool> = (0..N).map(|i| i % 3 == 0).collect();
+    b.iter(|| {
+        let mut v = base.clone();
+        v.insert(N / 2, true);
+        black_box(v.remove(N / 4))
+    });
+}
+
 // --- compact sort (counting sort) vs sorting a plain bool vec ---
 
 fn compact_sort(b: &mut Bencher) {
@@ -202,6 +222,8 @@ benchmark_group!(
     compact_eq,
     apply_index_reverse,
     sort_by_key_mass,
+    compact_insert_remove_mid,
+    plain_bool_insert_remove_mid,
     compact_sort,
     plain_bool_sort
 );

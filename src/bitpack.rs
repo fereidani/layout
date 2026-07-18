@@ -476,6 +476,98 @@ impl<const BITS: u32> PackedArray<BITS> {
         }
     }
 
+    /// Read `n <= usize::BITS` bits starting at absolute bit position `bit`,
+    /// straddling at most two words.
+    #[inline(always)]
+    fn read_bits(words: &[usize], bit: usize, n: usize) -> usize {
+        let word_bits = usize::BITS as usize;
+        let w = bit / word_bits;
+        let r = bit % word_bits;
+        let val = if r == 0 {
+            words[w]
+        } else if r + n <= word_bits {
+            words[w] >> r
+        } else {
+            (words[w] >> r) | (words[w + 1] << (word_bits - r))
+        };
+        if n == word_bits {
+            val
+        } else {
+            val & ((1usize << n) - 1)
+        }
+    }
+
+    /// Write the low `n <= usize::BITS` bits of `val` at absolute bit
+    /// position `bit`, preserving all surrounding bits (masked
+    /// read-modify-write of at most two words).
+    #[inline(always)]
+    fn write_bits(words: &mut [usize], bit: usize, n: usize, val: usize) {
+        let word_bits = usize::BITS as usize;
+        let w = bit / word_bits;
+        let r = bit % word_bits;
+        let m = if n == word_bits {
+            usize::MAX
+        } else {
+            (1usize << n) - 1
+        };
+        let v = val & m;
+        // Bits shifted past the word boundary drop out of the low word and
+        // are re-materialized into the next word below.
+        words[w] = (words[w] & !(m << r)) | (v << r);
+        if r + n > word_bits {
+            let spill_mask = (1usize << (r + n - word_bits)) - 1;
+            words[w + 1] =
+                (words[w + 1] & !spill_mask) | (v >> (word_bits - r));
+        }
+    }
+
+    /// Move `count` lanes from `src` to `dst` within the store. The ranges
+    /// may overlap (memmove semantics): the copy direction follows the
+    /// offsets so no lane is read after being overwritten.
+    ///
+    /// Runs word-at-a-time (funnel shifts), so a shift of a long tail costs
+    /// `count / lanes_per_word` iterations instead of `count` lane
+    /// read-modify-writes.
+    pub fn copy_lanes(&mut self, src: usize, dst: usize, count: usize) {
+        assert!(
+            src <= self.len
+                && count <= self.len - src
+                && dst <= self.len
+                && count <= self.len - dst,
+            "copy range out of bounds: the len is {} but the ranges are \
+             {src}..{src}+{count} and {dst}..{dst}+{count}",
+            self.len
+        );
+        if count == 0 || src == dst {
+            return;
+        }
+        let word_bits = usize::BITS as usize;
+        let b = BITS as usize;
+        let total = count * b;
+        let sbit = src * b;
+        let dbit = dst * b;
+        if dbit < sbit {
+            // Moving down: ascending chunks; each write trails every
+            // still-unread source bit.
+            let mut done = 0;
+            while done < total {
+                let n = word_bits.min(total - done);
+                let v = Self::read_bits(&self.words, sbit + done, n);
+                Self::write_bits(&mut self.words, dbit + done, n, v);
+                done += n;
+            }
+        } else {
+            // Moving up: descending chunks, symmetrically.
+            let mut left = total;
+            while left > 0 {
+                let n = word_bits.min(left);
+                left -= n;
+                let v = Self::read_bits(&self.words, sbit + left, n);
+                Self::write_bits(&mut self.words, dbit + left, n, v);
+            }
+        }
+    }
+
     /// Whether `self`'s lanes `[start, start + len)` equal `other`'s lanes
     /// `[other_start, other_start + len)`.
     ///
@@ -695,6 +787,8 @@ pub trait BitPack: Clone + Default + core::fmt::Debug + Sized {
     fn extend_fill(&mut self, value: usize, count: usize);
     /// Overwrite lanes `[start, start + len)` with `value`.
     fn fill_range(&mut self, start: usize, len: usize, value: usize);
+    /// Move `count` lanes from `src` to `dst` (overlap allowed).
+    fn copy_lanes(&mut self, src: usize, dst: usize, count: usize);
     /// Whether `self`'s lanes `[start, start + len)` equal `other`'s lanes at
     /// `other_start`.
     fn range_eq(
@@ -800,6 +894,10 @@ impl<const BITS: u32> BitPack for PackedArray<BITS> {
     #[inline]
     fn fill_range(&mut self, start: usize, len: usize, value: usize) {
         PackedArray::fill_range(self, start, len, value);
+    }
+    #[inline]
+    fn copy_lanes(&mut self, src: usize, dst: usize, count: usize) {
+        PackedArray::copy_lanes(self, src, dst, count);
     }
     #[inline]
     fn range_eq(
