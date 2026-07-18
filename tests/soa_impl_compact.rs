@@ -1,6 +1,12 @@
 //! Verifies `#[soa_impl]` works with compact `bool` and compact enum fields:
 //! read methods (`get`), write methods (`set`), and mixed regular+compact
 //! access, called on the owned struct, `Ref`, and `RefMut`.
+
+// `#[soa_impl]` clones every method onto the owned struct, `Ref` and
+// `RefMut`; the tests exercise each method on some but not all three
+// receivers, so the unexercised copies trip dead_code.
+#![allow(dead_code)]
+
 use layout::{soa_impl, Compact, CompactRepr, SOA};
 
 #[repr(u8)]
