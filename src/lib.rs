@@ -27,9 +27,9 @@
 //! }
 //! ```
 //!
-//! It will also generate the same functions that a `Vec<Chees>` would have, and
-//! a few helper structs: `CheeseSlice`, `CheeseSliceMut`, `CheeseRef` and
-//! `CheeseRefMut` corresponding respectivly to `&[Cheese]`, `&mut [Cheese]`,
+//! It will also generate the same functions that a `Vec<Cheese>` would have,
+//! and a few helper structs: `CheeseSlice`, `CheeseSliceMut`, `CheeseRef` and
+//! `CheeseRefMut` corresponding respectively to `&[Cheese]`, `&mut [Cheese]`,
 //! `&Cheese` and `&mut Cheese`.
 //!
 //! # How to use it
@@ -102,7 +102,7 @@
 //! same applies to `Index` and `IndexMut` trait, that can not return
 //! `CheeseRef/CheeseRefMut`.
 //!
-//! This means that the we can not index into a `CheeseVec`, and that a few
+//! This means that we cannot index into a `CheeseVec`, and that a few
 //! functions are duplicated, or require a call to `as_ref()/as_mut()` to change
 //! the type used.
 //!
@@ -159,7 +159,7 @@
 //! # vec.push(Cheese::new("stilton"));
 //! # vec.push(Cheese::new("brie"));
 //! for name in &vec.name {
-//!     // We get referenes to the names
+//!     // We get references to the names
 //!     let typeof_name: &String = name;
 //!     println!("got cheese {}", name);
 //! }
@@ -291,7 +291,9 @@ pub use column::Column;
 /// Trait implemented by types that can be stored in a compact (bit-packed)
 /// column: `bool` and any fieldless enum that derives `CompactRepr`.
 pub use compact::CompactRepr;
-#[doc(hidden)]
+// Visible (not hidden) re-exports: generated struct fields and method
+// signatures name these types at the crate root (e.g. a compact column is
+// a `layout::CompactVec<T>` field), so this is their documented home.
 pub use compact::{
     Compact, CompactBool, CompactChunks, CompactChunksExact,
     CompactChunksExactMut, CompactChunksMut, CompactDrain, CompactIntoIter,
@@ -520,10 +522,10 @@ impl<'a, T> SoACursor for core::slice::IterMut<'a, T> {
     }
 }
 
-/// Any struct derived by SOA will auto impl this trait You can use
-/// `<Cheese as SOA>::Type` instead of explicit named type
-/// `CheeseVec`; This will helpful in generics programing that generate struct
-/// can be expressed as `<T as SOA>::Type`
+/// Any struct derived by SOA will auto impl this trait. You can use
+/// `<Cheese as SOA>::Type` instead of the explicit named type `CheeseVec`,
+/// which helps in generic programming where the generated struct is
+/// expressed as `<T as SOA>::Type`.
 pub trait SOA {
     type Type;
 }
@@ -547,7 +549,7 @@ pub trait SoAIter<'a> {
 mod private_soa_indexes {
     // From [`core::slice::SliceIndex`](https://doc.rust-lang.org/std/slice/trait.SliceIndex.html) code.
     // Limits the types that may implement the SoA index traits.
-    // It's also helpful to have the exaustive list of all accepted types.
+    // It's also helpful to have the exhaustive list of all accepted types.
 
     use ::core::ops;
 
@@ -639,7 +641,7 @@ pub trait SoAIndexMut<T>: private_soa_indexes::Sealed {
 /// ```
 ///
 /// The iterator can also work with external iterators. In this case, the
-/// iterator will yields elements until any of the fields or one external
+/// iterator will yield elements until any of the fields or one external
 /// iterator returns None.
 ///
 /// ```
@@ -1130,7 +1132,7 @@ macro_rules! soa_zip_impl {
         $crate::soa_zip_impl!(@flatten ($p, a) => ( $($tup)*, a ) $( , $tail )*)
     };
 
-    // The main code is emmited here: we create an iterator, zip it and then
+    // The main code is emitted here: we create an iterator, zip it and then
     // map the zipped iterator to flatten it
     (@last , $first: expr, $($tail: expr,)*) => {
         ::core::iter::IntoIterator::into_iter($first)
