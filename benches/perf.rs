@@ -77,10 +77,28 @@ fn compact_from_iter_filtered(b: &mut Bencher) {
     });
 }
 
+// --- push throughput: compact column vs plain byte Vec ---
+
+fn compact_push_build(b: &mut Bencher) {
+    b.iter(|| black_box(build_compact_bools(N, |i| i % 3 == 0)));
+}
+
+fn plain_bool_push_build(b: &mut Bencher) {
+    b.iter(|| {
+        let mut v = Vec::with_capacity(N);
+        for i in 0..N {
+            v.push(i % 3 == 0);
+        }
+        black_box(v)
+    });
+}
+
 benchmark_group!(
     perf,
     from_iter_exact,
     from_iter_filtered,
-    compact_from_iter_filtered
+    compact_from_iter_filtered,
+    compact_push_build,
+    plain_bool_push_build
 );
 benchmark_main!(perf);
