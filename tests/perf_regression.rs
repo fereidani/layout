@@ -162,6 +162,42 @@ fn compact_iter_matches_oracle_all_directions() {
     }
 }
 
+#[derive(Clone, SOA)]
+#[layout(Clone)]
+struct Item {
+    key: u32,
+    seq: u32,
+}
+
+// The decorated `sort_by_key` must order by key and stay stable (equal keys
+// keep their original relative order).
+#[test]
+fn sort_by_key_orders_and_is_stable() {
+    let mut v = ItemVec::new();
+    for i in 0..1000u32 {
+        v.push(Item {
+            key: i % 10,
+            seq: i,
+        });
+    }
+    v.as_mut_slice().sort_by_key(|r| *r.key);
+
+    let mut prev_key = 0u32;
+    let mut last_seq_for_key = [None::<u32>; 10];
+    for r in v.iter() {
+        let (k, s) = (*r.key, *r.seq);
+        assert!(k >= prev_key, "not ordered by key");
+        prev_key = k;
+        if let Some(prev_seq) = last_seq_for_key[k as usize] {
+            assert!(
+                s > prev_seq,
+                "unstable within key {k}: {s} after {prev_seq}"
+            );
+        }
+        last_seq_for_key[k as usize] = Some(s);
+    }
+}
+
 // Word-batched equality must ignore stale bits past the length: two columns
 // with equal lanes but different tail junk compare equal; a single differing
 // lane compares unequal.
