@@ -211,7 +211,7 @@ impl<'a, T: CompactRepr> CompactRefMut<'a, T> {
         if ::branches::likely(!self.packed.is_null()) {
             // SAFETY: `packed` aliases borrowed storage that is still live;
             // `index` is in bounds by construction.
-            unsafe { T::decode((*self.packed).get(self.index)) }
+            unsafe { T::decode((*self.packed).get_unchecked(self.index)) }
         } else {
             // SAFETY: `direct` aliases the borrowed `&mut T` which is still
             // live.
@@ -225,7 +225,7 @@ impl<'a, T: CompactRepr> CompactRefMut<'a, T> {
         if ::branches::likely(!self.packed.is_null()) {
             // SAFETY: as above.
             unsafe {
-                (*self.packed).set(self.index, T::encode(value));
+                (*self.packed).set_unchecked(self.index, T::encode(value));
             }
         } else {
             // SAFETY: as above.
@@ -467,11 +467,15 @@ impl<T: CompactRepr> CompactVec<T> {
             self.len()
         );
         self.push(Compact::new(element.0));
-        for i in (index + 1..self.len()).rev() {
-            let v = self.inner.get(i - 1);
-            self.inner.set(i, v);
+        // SAFETY: every touched lane is `< self.len()` (`index <= len` was
+        // asserted above and the column just grew by one).
+        unsafe {
+            for i in (index + 1..self.len()).rev() {
+                let v = self.inner.get_unchecked(i - 1);
+                self.inner.set_unchecked(i, v);
+            }
+            self.inner.set_unchecked(index, T::encode(element.0));
         }
-        self.inner.set(index, T::encode(element.0));
     }
 
     pub fn remove(&mut self, index: usize) -> Compact<T> {
@@ -481,11 +485,16 @@ impl<T: CompactRepr> CompactVec<T> {
             self.len(),
             index
         );
-        let val = Compact(T::decode(self.inner.get(index)));
-        for i in index..self.len() - 1 {
-            let v = self.inner.get(i + 1);
-            self.inner.set(i, v);
-        }
+        // SAFETY: `index < self.len()` was asserted above, and every lane
+        // touched by the shift is `< self.len()`.
+        let val = unsafe {
+            let val = Compact(T::decode(self.inner.get_unchecked(index)));
+            for i in index..self.len() - 1 {
+                let v = self.inner.get_unchecked(i + 1);
+                self.inner.set_unchecked(i, v);
+            }
+            val
+        };
         self.inner.pop();
         val
     }
@@ -497,13 +506,16 @@ impl<T: CompactRepr> CompactVec<T> {
             self.len(),
             index
         );
-        let val = Compact(T::decode(self.inner.get(index)));
+        // SAFETY: `index < self.len()` was asserted above.
+        let val =
+            unsafe { Compact(T::decode(self.inner.get_unchecked(index))) };
         let last = match self.inner.pop() {
             Some(v) => v,
             None => return val,
         };
         if index < self.inner.len() {
-            self.inner.set(index, last);
+            // SAFETY: `index < self.inner.len()` just checked.
+            unsafe { self.inner.set_unchecked(index, last) };
         }
         val
     }
@@ -515,9 +527,12 @@ impl<T: CompactRepr> CompactVec<T> {
             self.len(),
             index
         );
-        let old = Compact(T::decode(self.inner.get(index)));
-        self.inner.set(index, T::encode(element.0));
-        old
+        // SAFETY: `index < self.len()` was asserted above.
+        unsafe {
+            let old = Compact(T::decode(self.inner.get_unchecked(index)));
+            self.inner.set_unchecked(index, T::encode(element.0));
+            old
+        }
     }
 
     /// Set the element at `index` to `value`.
@@ -533,7 +548,8 @@ impl<T: CompactRepr> CompactVec<T> {
             self.len(),
             index
         );
-        self.inner.set(index, T::encode(value.0));
+        // SAFETY: `index < self.len()` just asserted.
+        unsafe { self.inner.set_unchecked(index, T::encode(value.0)) };
     }
 
     #[inline]
@@ -649,7 +665,8 @@ impl<T: CompactRepr> CompactVec<T> {
 
     pub fn get(&self, index: usize) -> Option<Compact<T>> {
         if index < self.inner.len() {
-            Some(Compact(T::decode(self.inner.get(index))))
+            // SAFETY: `index < self.inner.len()` just checked.
+            Some(unsafe { Compact(T::decode(self.inner.get_unchecked(index))) })
         } else {
             None
         }
@@ -911,17 +928,26 @@ impl<'a, T: CompactRepr> CompactSlice<'a, T> {
         self.len == 0
     }
 
-    fn read(&self, offset: usize) -> Compact<T> {
-        // SAFETY: callers only invoke `read` for `offset < len`, and `len > 0`
-        // implies the slice is backed by valid storage.
-        unsafe { Compact(T::decode((*self.packed).get(self.start + offset))) }
+    /// Read the element at `offset` from the backing storage.
+    ///
+    /// # Safety
+    ///
+    /// `offset < self.len` must hold, which also implies the slice is backed
+    /// by valid storage.
+    unsafe fn read(&self, offset: usize) -> Compact<T> {
+        unsafe {
+            Compact(T::decode(
+                (*self.packed).get_unchecked(self.start + offset),
+            ))
+        }
     }
 
     pub fn first(&self) -> Option<Compact<T>> {
         if self.is_empty() {
             None
         } else {
-            Some(self.read(0))
+            // SAFETY: `0 < self.len`.
+            Some(unsafe { self.read(0) })
         }
     }
 
@@ -929,7 +955,8 @@ impl<'a, T: CompactRepr> CompactSlice<'a, T> {
         if self.is_empty() {
             None
         } else {
-            Some(self.read(self.len - 1))
+            // SAFETY: `self.len - 1 < self.len`.
+            Some(unsafe { self.read(self.len - 1) })
         }
     }
 
@@ -938,7 +965,8 @@ impl<'a, T: CompactRepr> CompactSlice<'a, T> {
             return None;
         }
         Some((
-            self.read(0),
+            // SAFETY: `0 < self.len`.
+            unsafe { self.read(0) },
             CompactSlice {
                 packed: self.packed,
                 start: self.start + 1,
@@ -953,7 +981,8 @@ impl<'a, T: CompactRepr> CompactSlice<'a, T> {
             return None;
         }
         Some((
-            self.read(self.len - 1),
+            // SAFETY: `self.len - 1 < self.len`.
+            unsafe { self.read(self.len - 1) },
             CompactSlice {
                 packed: self.packed,
                 start: self.start,
@@ -986,7 +1015,8 @@ impl<'a, T: CompactRepr> CompactSlice<'a, T> {
 
     pub fn get(&self, index: usize) -> Option<Compact<T>> {
         if index < self.len {
-            Some(self.read(index))
+            // SAFETY: `index < self.len` just checked.
+            Some(unsafe { self.read(index) })
         } else {
             None
         }
@@ -1013,7 +1043,8 @@ impl<'a, T: CompactRepr> CompactSlice<'a, T> {
     /// `index` must be in bounds (`index < self.len`) and the slice must
     /// reference initialized backing storage.
     pub unsafe fn get_unchecked(&self, index: usize) -> Compact<T> {
-        self.read(index)
+        // SAFETY: forwarded contract (`index < self.len`).
+        unsafe { self.read(index) }
     }
 
     pub fn index(&self, index: usize) -> Compact<T> {
@@ -1023,7 +1054,8 @@ impl<'a, T: CompactRepr> CompactSlice<'a, T> {
             self.len,
             index
         );
-        self.read(index)
+        // SAFETY: `index < self.len` just asserted.
+        unsafe { self.read(index) }
     }
 
     pub fn reborrow<'b>(&'b self) -> CompactSlice<'b, T>
@@ -1235,8 +1267,16 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
         self.as_ref()
     }
 
+    /// # Safety
+    ///
+    /// `offset < self.len` must hold, which also implies the slice is backed
+    /// by valid storage.
     unsafe fn read(&self, offset: usize) -> Compact<T> {
-        Compact(T::decode((*self.packed).get(self.start + offset)))
+        unsafe {
+            Compact(T::decode(
+                (*self.packed).get_unchecked(self.start + offset),
+            ))
+        }
     }
 
     pub fn first_mut(&mut self) -> Option<CompactRefMut<'_, T>> {
@@ -1332,12 +1372,14 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
             a,
             b
         );
+        // SAFETY: `a < self.len` and `b < self.len` were just asserted, so
+        // both lanes are in bounds of the live backing storage.
         unsafe {
             let pa = &mut *self.packed;
-            let va = pa.get(self.start + a);
-            let vb = pa.get(self.start + b);
-            pa.set(self.start + a, vb);
-            pa.set(self.start + b, va);
+            let va = pa.get_unchecked(self.start + a);
+            let vb = pa.get_unchecked(self.start + b);
+            pa.set_unchecked(self.start + a, vb);
+            pa.set_unchecked(self.start + b, va);
         }
     }
 
@@ -1488,6 +1530,8 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
             visited.set(d);
         }
         visited.clear();
+        // SAFETY: every index in `dest` was validated to be `< len` above, so
+        // `self.start + i` stays within the slice's live backing storage.
         unsafe {
             let pa = &mut *self.packed;
             for start in 0..len {
@@ -1498,16 +1542,16 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
                 // Rotate each cycle into place using a single saved value so no
                 // element is lost.
                 visited.set(start);
-                let mut temp = pa.get(self.start + start);
+                let mut temp = pa.get_unchecked(self.start + start);
                 let mut current = start;
                 loop {
                     let next = dest[current];
                     if next == start {
-                        pa.set(self.start + start, temp);
+                        pa.set_unchecked(self.start + start, temp);
                         break;
                     }
-                    let saved = pa.get(self.start + next);
-                    pa.set(self.start + next, temp);
+                    let saved = pa.get_unchecked(self.start + next);
+                    pa.set_unchecked(self.start + next, temp);
                     temp = saved;
                     visited.set(next);
                     current = next;
@@ -1589,8 +1633,12 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
         {
             let pa = unsafe { &*self.packed };
             argsort.sort_by(|j, k| {
-                let a = Compact(T::decode(pa.get(self.start + *j)));
-                let b = Compact(T::decode(pa.get(self.start + *k)));
+                let a = Compact(T::decode(unsafe {
+                    pa.get_unchecked(self.start + *j)
+                }));
+                let b = Compact(T::decode(unsafe {
+                    pa.get_unchecked(self.start + *k)
+                }));
                 f(a, b)
             });
         }
@@ -1607,11 +1655,14 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
             return;
         }
         let mut argsort: Vec<usize> = (0..len).collect();
-        // SAFETY: `self.packed` is a valid `Store<T>` for the slice's lifetime.
+        // SAFETY: `self.packed` is a valid `Store<T>` for the slice's
+        // lifetime; `*i` is in `0..len` by construction.
         {
             let pa = unsafe { &*self.packed };
             argsort.sort_by_key(|i| {
-                let v = Compact(T::decode(pa.get(self.start + *i)));
+                let v = Compact(T::decode(unsafe {
+                    pa.get_unchecked(self.start + *i)
+                }));
                 f(v)
             });
         }
@@ -1636,11 +1687,15 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
         let pa = unsafe { &*self.packed };
         let mut sorted = Store::<T>::with_capacity(len);
         for &src in argsort {
-            sorted.push(pa.get(self.start + src));
+            // SAFETY: `src < len` (argsort is a permutation of `0..len`).
+            sorted.push(unsafe { pa.get_unchecked(self.start + src) });
         }
         let pam = unsafe { &mut *self.packed };
         for i in 0..len {
-            pam.set(self.start + i, sorted.get(i));
+            // SAFETY: `i < len` and `sorted` holds exactly `len` lanes.
+            unsafe {
+                pam.set_unchecked(self.start + i, sorted.get_unchecked(i));
+            }
         }
     }
 }
@@ -1800,7 +1855,9 @@ impl<T: CompactRepr> CompactPtr<T> {
         } else if self.index == DIRECT_INDEX {
             Some(Compact(*self.packed.cast::<T>()))
         } else {
-            Some(Compact(T::decode((*self.packed).get(self.index))))
+            // SAFETY: the caller guarantees `index` addresses an initialized
+            // element of the live storage.
+            Some(Compact(T::decode((*self.packed).get_unchecked(self.index))))
         }
     }
 
@@ -1875,7 +1932,9 @@ impl<T: CompactRepr> CompactPtr<T> {
         if self.index == DIRECT_INDEX {
             Compact(*self.packed.cast::<T>())
         } else {
-            Compact(T::decode((*self.packed).get(self.index)))
+            // SAFETY: the caller guarantees `index` addresses an initialized
+            // element of the live storage.
+            Compact(T::decode((*self.packed).get_unchecked(self.index)))
         }
     }
 }
@@ -1896,7 +1955,9 @@ impl<T: CompactRepr> CompactPtrMut<T> {
         if self.is_null() {
             None
         } else {
-            Some(Compact(T::decode((*self.packed).get(self.index))))
+            // SAFETY: the caller guarantees `index` addresses an initialized
+            // element of the live storage.
+            Some(Compact(T::decode((*self.packed).get_unchecked(self.index))))
         }
     }
 
@@ -1974,7 +2035,9 @@ impl<T: CompactRepr> CompactPtrMut<T> {
     /// `self.packed` must point to valid `Store<T>` storage and `self.index`
     /// must address an initialized element within it.
     pub unsafe fn read(self) -> Compact<T> {
-        Compact(T::decode((*self.packed).get(self.index)))
+        // SAFETY: the caller guarantees `index` addresses an initialized
+        // element of the live storage.
+        Compact(T::decode((*self.packed).get_unchecked(self.index)))
     }
 
     /// Overwrites the element the pointer references (analogous to
@@ -1987,7 +2050,9 @@ impl<T: CompactRepr> CompactPtrMut<T> {
     /// other references to the same element exist (no aliasing).
     #[allow(clippy::forget_non_drop)]
     pub unsafe fn write(self, val: Compact<T>) {
-        (*self.packed).set(self.index, T::encode(val.0));
+        // SAFETY: the caller guarantees `index` addresses a writable element
+        // of the live storage.
+        (*self.packed).set_unchecked(self.index, T::encode(val.0));
     }
 }
 

@@ -150,19 +150,77 @@ impl<const BITS: u32> PackedArray<BITS> {
     }
 
     /// Read the element at `index` as a `usize`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index >= self.len()`.
     #[inline]
     pub fn get(&self, index: usize) -> usize {
-        debug_assert!(index < self.len, "index out of bounds");
-        let word = self.words[Self::word_of(index)];
-        (word >> Self::offset_of(index)) & Self::mask()
+        assert!(
+            index < self.len,
+            "index out of bounds: the len is {} but the index is {}",
+            self.len,
+            index
+        );
+        // SAFETY: `index < self.len` implies the lane's word is in bounds.
+        unsafe { self.get_unchecked(index) }
     }
 
     /// Write `value` (truncated to `BITS` bits) to the element at `index`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index >= self.len()`.
     #[inline]
     pub fn set(&mut self, index: usize, value: usize) {
-        debug_assert!(index < self.len, "index out of bounds");
+        assert!(
+            index < self.len,
+            "index out of bounds: the len is {} but the index is {}",
+            self.len,
+            index
+        );
+        // SAFETY: `index < self.len` implies the lane's word is in bounds.
+        unsafe { self.set_unchecked(index, value) }
+    }
+
+    /// Read the element at `index` without any bounds checking.
+    ///
+    /// # Safety
+    ///
+    /// The lane's word must be allocated (`index / items_per_word <
+    /// words.len()`) and the lane must hold a previously written value.
+    /// Callers normally guarantee both via `index < self.len()`; the drain
+    /// machinery also reads initialized lanes beyond the current length while
+    /// the backing words are kept alive.
+    #[inline(always)]
+    pub unsafe fn get_unchecked(&self, index: usize) -> usize {
+        debug_assert!(
+            Self::word_of(index) < self.words.len(),
+            "lane {index} has no backing word"
+        );
+        // SAFETY: the caller guarantees the word exists.
+        let word = unsafe { *self.words.get_unchecked(Self::word_of(index)) };
+        (word >> Self::offset_of(index)) & Self::mask()
+    }
+
+    /// Write `value` (truncated to `BITS` bits) to the element at `index`
+    /// without any bounds checking.
+    ///
+    /// # Safety
+    ///
+    /// The lane's word must be allocated (`index / items_per_word <
+    /// words.len()`). Callers normally guarantee this via
+    /// `index < self.len()`.
+    #[inline(always)]
+    pub unsafe fn set_unchecked(&mut self, index: usize, value: usize) {
+        debug_assert!(
+            Self::word_of(index) < self.words.len(),
+            "lane {index} has no backing word"
+        );
         let off = Self::offset_of(index);
-        let slot = &mut self.words[Self::word_of(index)];
+        // SAFETY: the caller guarantees the word exists.
+        let slot =
+            unsafe { self.words.get_unchecked_mut(Self::word_of(index)) };
         *slot &= !(Self::mask() << off);
         *slot |= (value & Self::mask()) << off;
     }
@@ -191,7 +249,8 @@ impl<const BITS: u32> PackedArray<BITS> {
         if self.len == 0 {
             return None;
         }
-        let value = self.get(self.len - 1);
+        // SAFETY: `self.len - 1 < self.len`.
+        let value = unsafe { self.get_unchecked(self.len - 1) };
         self.len -= 1;
         // Symmetric with push: drop the now-empty tail word.
         if self.len % Self::items_per_word() == 0 {
@@ -237,7 +296,8 @@ impl<const BITS: u32> PackedArray<BITS> {
             // Unaligned tail: merge element by element into the partial word;
             // `push` advances the length itself.
             for i in 0..other_len {
-                self.push(other.get(i));
+                // SAFETY: `i < other_len == other.len`.
+                self.push(unsafe { other.get_unchecked(i) });
             }
         }
         other.clear();
@@ -254,7 +314,12 @@ impl<const BITS: u32> PackedArray<BITS> {
         start: usize,
         len: usize,
     ) {
-        debug_assert!(start + len <= other.len);
+        assert!(
+            start <= other.len && len <= other.len - start,
+            "source range out of bounds: the len is {} but the range is \
+             {start}..{start}+{len}",
+            other.len
+        );
         if len == 0 {
             return;
         }
@@ -270,7 +335,9 @@ impl<const BITS: u32> PackedArray<BITS> {
             self.len += len;
         } else {
             for i in 0..len {
-                self.push(other.get(start + i));
+                // SAFETY: `start + i < start + len <= other.len` (asserted
+                // above).
+                self.push(unsafe { other.get_unchecked(start + i) });
             }
         }
     }
@@ -319,6 +386,13 @@ impl<const BITS: u32> PackedArray<BITS> {
         other_start: usize,
         len: usize,
     ) -> bool {
+        assert!(
+            start <= self.len
+                && len <= self.len - start
+                && other_start <= other.len
+                && len <= other.len - other_start,
+            "compare range out of bounds"
+        );
         if len == 0 {
             return true;
         }
@@ -348,7 +422,12 @@ impl<const BITS: u32> PackedArray<BITS> {
     /// (auto-vectorizable). Boundary words (at most two) fall back to
     /// per-element extraction. Multi-bit widths count lanes within each word.
     pub fn count_in(&self, start: usize, len: usize, value: usize) -> usize {
-        debug_assert!(start.saturating_add(len) <= self.len);
+        assert!(
+            start <= self.len && len <= self.len - start,
+            "count range out of bounds: the len is {} but the range is \
+             {start}..{start}+{len}",
+            self.len
+        );
         let per = Self::items_per_word();
         let mut total = 0usize;
         let mut idx = start;
@@ -364,7 +443,8 @@ impl<const BITS: u32> PackedArray<BITS> {
                 // Partial boundary word: extract element by element.
                 let stop = wend.min(end);
                 for i in idx..stop {
-                    if self.get(i) == value {
+                    // SAFETY: `i < end <= self.len` (checked on entry).
+                    if unsafe { self.get_unchecked(i) } == value {
                         total += 1;
                     }
                 }
@@ -474,10 +554,22 @@ pub trait BitPack: Clone + Default + core::fmt::Debug + Sized {
     fn truncate(&mut self, new_len: usize);
     /// Read the element at `index` as a `usize`.
     fn get(&self, index: usize) -> usize;
+    /// Read the element at `index` without bounds checking.
+    ///
+    /// # Safety
+    /// The lane's backing word must be allocated and hold a previously
+    /// written value; callers normally guarantee both via `index < len()`.
+    unsafe fn get_unchecked(&self, index: usize) -> usize;
     /// Raw packed word at word-index `index` (for word-at-a-time reads).
     fn word(&self, index: usize) -> usize;
     /// Write `value` to the element at `index`.
     fn set(&mut self, index: usize, value: usize);
+    /// Write `value` to the element at `index` without bounds checking.
+    ///
+    /// # Safety
+    /// The lane's backing word must be allocated; callers normally guarantee
+    /// this via `index < len()`.
+    unsafe fn set_unchecked(&mut self, index: usize, value: usize);
     /// Append `value` to the end.
     fn push(&mut self, value: usize);
     /// Remove and return the last element, if any.
@@ -545,6 +637,11 @@ impl<const BITS: u32> BitPack for PackedArray<BITS> {
     fn get(&self, index: usize) -> usize {
         PackedArray::get(self, index)
     }
+    #[inline(always)]
+    unsafe fn get_unchecked(&self, index: usize) -> usize {
+        // SAFETY: forwarded contract.
+        unsafe { PackedArray::get_unchecked(self, index) }
+    }
     #[inline]
     fn word(&self, index: usize) -> usize {
         debug_assert!(index < self.words.len());
@@ -553,6 +650,11 @@ impl<const BITS: u32> BitPack for PackedArray<BITS> {
     #[inline]
     fn set(&mut self, index: usize, value: usize) {
         PackedArray::set(self, index, value);
+    }
+    #[inline(always)]
+    unsafe fn set_unchecked(&mut self, index: usize, value: usize) {
+        // SAFETY: forwarded contract.
+        unsafe { PackedArray::set_unchecked(self, index, value) };
     }
     #[inline]
     fn push(&mut self, value: usize) {
@@ -721,10 +823,10 @@ mod tests {
                     }
                     dest.extend_from_packed(&src, st, ln);
                     assert_eq!(dest.len(), dl + ln);
-                    for i in 0..dest.len() {
+                    for (i, &w) in want.iter().enumerate() {
                         assert_eq!(
                             dest.get(i),
-                            want[i],
+                            w,
                             "packed B={B} dl={dl} st={st} ln={ln} at {i}"
                         );
                     }
@@ -747,10 +849,10 @@ mod tests {
                     }
                     dest.extend_fill(v, cnt);
                     assert_eq!(dest.len(), dl + cnt);
-                    for i in 0..dest.len() {
+                    for (i, &w) in want.iter().enumerate() {
                         assert_eq!(
                             dest.get(i),
-                            want[i],
+                            w,
                             "fill B={B} dl={dl} cnt={cnt} v={v} at {i}"
                         );
                     }
