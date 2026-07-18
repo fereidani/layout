@@ -2236,6 +2236,53 @@ impl<'a, T: CompactRepr> Iterator for CompactIter<'a, T> {
     fn count(self) -> usize {
         self.end - self.pos
     }
+    #[inline]
+    fn nth(&mut self, n: usize) -> Option<Compact<T>> {
+        let remaining = self.end - self.pos;
+        if n >= remaining {
+            self.pos = self.end;
+            self.avail = 0;
+            return None;
+        }
+        // Jump the cursor and invalidate the shifted word cache.
+        self.pos += n;
+        self.avail = 0;
+        self.next()
+    }
+    #[inline]
+    fn last(mut self) -> Option<Compact<T>> {
+        if self.pos < self.end {
+            // SAFETY: `pos < end` just checked.
+            Some(unsafe { self.read_back() })
+        } else {
+            None
+        }
+    }
+    fn fold<B, F>(mut self, init: B, mut f: F) -> B
+    where
+        F: FnMut(B, Compact<T>) -> B,
+    {
+        // Internal iteration goes word-at-a-time: each backing word is
+        // loaded once and its lanes are peeled with constant shifts, with no
+        // per-element cursor bookkeeping. This is what `for_each`, `count`
+        // after `filter`, `sum` and friends compile down to.
+        let mut acc = init;
+        let per = (usize::BITS / T::BITS) as usize;
+        let mask = (1usize << T::BITS) - 1;
+        while self.pos < self.end {
+            let off = self.pos % per;
+            let in_word = (per - off).min(self.end - self.pos);
+            // SAFETY: `pos < end <= len`, so the word is live.
+            let mut w = unsafe { (*self.packed).word(self.pos / per) }
+                >> (off * T::BITS as usize);
+            for _ in 0..in_word {
+                acc = f(acc, Compact(T::decode(w & mask)));
+                w >>= T::BITS;
+            }
+            self.pos += in_word;
+        }
+        acc
+    }
 }
 
 impl<'a, T: CompactRepr> DoubleEndedIterator for CompactIter<'a, T> {
