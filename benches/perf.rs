@@ -93,12 +93,46 @@ fn plain_bool_push_build(b: &mut Bencher) {
     });
 }
 
+// --- compact bulk ops (word-aligned copies) vs a byte Vec clone ---
+
+fn compact_to_vec(b: &mut Bencher) {
+    let src = build_compact_bools(N, |i| i % 2 == 0);
+    b.iter(|| black_box(src.as_slice().to_vec()));
+}
+
+fn compact_extend_from_slice(b: &mut Bencher) {
+    let src = build_compact_bools(N, |i| i % 2 == 0);
+    b.iter(|| {
+        let mut dst: CompactVec<bool> = CompactVec::with_capacity(N);
+        dst.extend_from_slice(src.as_slice());
+        black_box(dst)
+    });
+}
+
+fn compact_split_off(b: &mut Bencher) {
+    let src = build_compact_bools(N, |i| i % 2 == 0);
+    b.iter(|| {
+        let mut a = src.clone();
+        let tail = a.split_off(N / 2);
+        black_box((a, tail))
+    });
+}
+
+fn plain_bytes_clone(b: &mut Bencher) {
+    let src: Vec<u8> = (0..N).map(|i| (i % 2) as u8).collect();
+    b.iter(|| black_box(src.clone()));
+}
+
 benchmark_group!(
     perf,
     from_iter_exact,
     from_iter_filtered,
     compact_from_iter_filtered,
     compact_push_build,
-    plain_bool_push_build
+    plain_bool_push_build,
+    compact_to_vec,
+    compact_extend_from_slice,
+    compact_split_off,
+    plain_bytes_clone
 );
 benchmark_main!(perf);

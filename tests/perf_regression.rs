@@ -80,3 +80,52 @@ fn capacity_returns_min_across_columns() {
     }
     assert_eq!(v.capacity(), v.id.capacity().min(v.flag.capacity()));
 }
+
+// The word-level bulk paths (to_vec / extend_from_slice / split_off / resize)
+// must produce the same lanes as element-wise copies, including at lengths
+// that leave a partial final word.
+#[test]
+fn compact_bulk_ops_preserve_lanes() {
+    use layout::{Compact, CompactVec};
+    for n in [0usize, 1, 63, 64, 65, 200, 1000] {
+        let src: CompactVec<bool> =
+            (0..n).map(|i| Compact::new(i % 3 == 0)).collect();
+
+        let copied = src.as_slice().to_vec();
+        assert!(copied
+            .iter()
+            .map(|c| c.get())
+            .eq((0..n).map(|i| i % 3 == 0)));
+
+        let mut dst: CompactVec<bool> =
+            (0..7).map(|i| Compact::new(i % 2 == 0)).collect();
+        dst.extend_from_slice(src.as_slice());
+        assert_eq!(dst.len(), 7 + n);
+        for i in 0..n {
+            assert_eq!(dst.get(7 + i).unwrap().get(), i % 3 == 0);
+        }
+
+        if n > 0 {
+            let mut a = src.clone();
+            let at = n / 2;
+            let tail = a.split_off(at);
+            assert_eq!(a.len(), at);
+            assert_eq!(tail.len(), n - at);
+            for i in 0..at {
+                assert_eq!(a.get(i).unwrap().get(), i % 3 == 0);
+            }
+            for i in 0..(n - at) {
+                assert_eq!(tail.get(i).unwrap().get(), (at + i) % 3 == 0);
+            }
+        }
+    }
+
+    // resize grows with the fill value and truncates back.
+    let mut v: CompactVec<bool> = CompactVec::new();
+    v.resize(100, Compact::new(true));
+    assert_eq!(v.len(), 100);
+    assert!(v.iter().all(|c| c.get()));
+    v.resize(10, Compact::new(false));
+    assert_eq!(v.len(), 10);
+    assert!(v.iter().all(|c| c.get()));
+}
