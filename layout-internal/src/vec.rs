@@ -154,7 +154,8 @@ pub fn derive(input: &Input) -> TokenStream {
             /// capacity, so per-field capacities may differ; this returns the most
             /// conservative (binding) value.
             pub fn capacity(&self) -> usize {
-                let mut capacity = self.#first_field.capacity();
+                // Structs always have >= 1 field, so the fold never returns MAX.
+                let mut capacity = usize::MAX;
                 #(capacity = capacity.min(self.#fields_names.capacity());)*
                 capacity
             }
