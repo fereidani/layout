@@ -59,3 +59,24 @@ fn compact_from_iter_capacity_tracks_result() {
     );
     assert!(kept.iter().all(|c| c.get()));
 }
+
+#[derive(SOA)]
+struct Tagged {
+    id: u64,
+    flag: layout::Compact<bool>,
+}
+
+// `capacity()` is the minimum across columns; plain and compact columns have
+// different granularity, so the fold must consider every column.
+#[test]
+fn capacity_returns_min_across_columns() {
+    use layout::Compact;
+    let mut v = TaggedVec::new();
+    for i in 0..1000u64 {
+        v.push(Tagged {
+            id: i,
+            flag: Compact::new(i % 2 == 0),
+        });
+    }
+    assert_eq!(v.capacity(), v.id.capacity().min(v.flag.capacity()));
+}
