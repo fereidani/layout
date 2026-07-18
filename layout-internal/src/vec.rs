@@ -115,12 +115,6 @@ pub fn derive(input: &Input) -> TokenStream {
         /// An analog to `
         #[doc = #vec_name_str]
         /// ` with Struct of Array (SoA) layout
-        ///
-        /// Dropping this vec drops column by column in field declaration
-        /// order (each column's elements in index order), not row by row as
-        /// `Vec<T>` would: all values of the first field drop before any
-        /// value of the second. Code must not rely on row-major drop order
-        /// across fields.
         #[allow(dead_code)]
         #(#[#attrs])*
         #[derive(Default)]
@@ -565,13 +559,19 @@ pub fn derive(input: &Input) -> TokenStream {
         #[allow(dead_code)]
         impl<'a> ::core::iter::ExactSizeIterator for #drain_name<'a> {}
 
-        // No custom `Drop`: each column drops itself (in declaration order,
-        // elements in index order). Dropping column-by-column is a plain
-        // sequential `drop_in_place` per column -- significantly cheaper than
-        // reassembling every row through a composite drain. The observable
-        // difference from `Vec<T>` is drop ORDER across fields: all `a`
-        // values drop before any `b` value, instead of row by row. See the
-        // struct documentation.
+        #[allow(clippy::drop_non_drop)]
+        impl Drop for #vec_name {
+            fn drop(&mut self) {
+                if !::core::mem::needs_drop::<#name>() {
+                    // Trivially droppable: the column vectors free their own
+                    // buffers.
+                    return;
+                }
+                // Drop in insertion order, matching `Vec<T>`. Draining moves
+                // each row out of the columns so their own `Drop` reaps nothing.
+                for _ in self.drain(..) {}
+            }
+        }
     };
 
     if input.attrs.derive_clone {

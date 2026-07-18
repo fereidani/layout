@@ -106,11 +106,6 @@
 //! functions are duplicated, or require a call to `as_ref()/as_mut()` to change
 //! the type used.
 //!
-//! Dropping a `CheeseVec` drops column by column in field declaration order
-//! (each column's elements in index order), not row by row as `Vec<Cheese>`
-//! would: every `smell` drops before any `color`. Code must not rely on
-//! row-major drop order across fields.
-//!
 //! # Iteration
 //!
 //! It is possible to iterate over the values in a `CheeseVec`
