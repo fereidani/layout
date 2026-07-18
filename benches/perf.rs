@@ -155,6 +155,17 @@ fn apply_index_reverse(b: &mut Bencher) {
     });
 }
 
+// --- decorated sort_by_key (keys evaluated once) ---
+
+fn sort_by_key_mass(b: &mut Bencher) {
+    let base = build_particles(N);
+    b.iter(|| {
+        let mut v = base.clone();
+        v.as_mut_slice().sort_by_key(|r| *r.mass as u64);
+        black_box(v)
+    });
+}
+
 benchmark_group!(
     perf,
     from_iter_exact,
@@ -169,6 +180,7 @@ benchmark_group!(
     compact_iter_count,
     compact_count_specialized,
     compact_eq,
-    apply_index_reverse
+    apply_index_reverse,
+    sort_by_key_mass
 );
 benchmark_main!(perf);

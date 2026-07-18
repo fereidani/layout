@@ -1008,8 +1008,16 @@ pub fn derive_mut(input: &Input) -> TokenStream {
                 F: FnMut(#ref_name) -> K,
                 K: Ord,
             {
-                let mut permutation: Vec<usize> = (0..self.len()).collect();
-                permutation.sort_by_key(|i| f(self.index(*i)));
+                // Evaluate the key once per element, then sort (key, index)
+                // pairs so comparisons touch only the cached keys instead of
+                // rebuilding a Ref (every column) on each of the O(n log n)
+                // comparisons. Ties break by index order, so this stays stable
+                // like `slice::sort_by_key`.
+                let mut keyed: Vec<(K, usize)> =
+                    (0..self.len()).map(|i| (f(self.index(i)), i)).collect();
+                keyed.sort_by(|a, b| a.0.cmp(&b.0));
+                let permutation: Vec<usize> =
+                    keyed.into_iter().map(|(_, i)| i).collect();
 
                 let dest = ::layout::__invert_permutation(&permutation);
                 self.__private_apply_permutation(&dest);
