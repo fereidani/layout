@@ -37,6 +37,14 @@ use alloc::vec::Vec;
 /// This type is `no_std` compatible (it only relies on `alloc::vec::Vec`).
 #[derive(Debug)]
 pub struct PackedArray<const BITS: u32> {
+    // Invariant: `words.len() >= words_for(len)`, and every lane `< len` holds
+    // a previously written value. The two lengths are normally tight
+    // (`words.len() == words_for(len)`); a lowered [`set_len`] (used by the
+    // drain machinery, and left behind by a leaked drain) may leave extra
+    // trailing words holding stale lanes. Bulk word-copy fast paths check for
+    // tightness and fall back to lane-at-a-time copies, so a slack store stays
+    // fully usable.
+    /// [`set_len`]: PackedArray::set_len
     words: Vec<usize>,
     len: usize,
 }
@@ -146,7 +154,27 @@ impl<const BITS: u32> PackedArray<BITS> {
 
     /// Shrink the allocated capacity to fit the current length.
     pub fn shrink_to_fit(&mut self) {
+        // Drop any stale words a leaked drain left behind, then release the
+        // spare allocation.
+        self.words.truncate(Self::words_for(self.len));
         self.words.shrink_to_fit();
+    }
+
+    /// Set the logical length without touching the backing words.
+    ///
+    /// Used by the drain machinery to mirror `Vec::drain`'s leak safety: the
+    /// length drops to the drain start up front while the drained lanes stay
+    /// alive in the words, so a leaked drain leaves a short but fully
+    /// consistent store.
+    ///
+    /// # Safety
+    ///
+    /// `words_for(new_len)` must not exceed `words.len()`, and every lane
+    /// `< new_len` must hold a previously written value.
+    #[inline]
+    pub unsafe fn set_len(&mut self, new_len: usize) {
+        debug_assert!(Self::words_for(new_len) <= self.words.len());
+        self.len = new_len;
     }
 
     /// Read the element at `index` as a `usize`.
@@ -228,17 +256,19 @@ impl<const BITS: u32> PackedArray<BITS> {
     /// Append `value` (truncated to `BITS` bits) to the end.
     #[inline]
     pub fn push(&mut self, value: usize) {
-        let per = Self::items_per_word();
         let off = Self::offset_of(self.len);
         let bits = (value & Self::mask()) << off;
-        if self.len % per == 0 {
-            // Fresh word (off == 0): store the value directly.
-            self.words.push(bits);
-        } else {
-            // Partial word: clear the slot (`truncate`/`pop` may have left
-            // stale bits) and set it, touching the tail word once.
-            let w = self.words.last_mut().expect("partial word exists");
+        if let Some(w) = self.words.get_mut(Self::word_of(self.len)) {
+            // The target word exists: a partial tail word, or a stale word a
+            // leaked drain left behind. Clear the slot (it may hold stale
+            // bits) and set it, touching the word once.
             *w = (*w & !(Self::mask() << off)) | bits;
+        } else {
+            // Fresh word. The target word can only be missing when the store
+            // is tight and the length is word-aligned, so `off == 0` and the
+            // value lands in the low lane directly.
+            debug_assert!(off == 0);
+            self.words.push(bits);
         }
         self.len += 1;
     }
@@ -252,10 +282,9 @@ impl<const BITS: u32> PackedArray<BITS> {
         // SAFETY: `self.len - 1 < self.len`.
         let value = unsafe { self.get_unchecked(self.len - 1) };
         self.len -= 1;
-        // Symmetric with push: drop the now-empty tail word.
-        if self.len % Self::items_per_word() == 0 {
-            self.words.pop();
-        }
+        // Symmetric with push: drop the now-empty tail word (and any stale
+        // words a leaked drain left behind).
+        self.words.truncate(Self::words_for(self.len));
         Some(value)
     }
 
@@ -283,18 +312,21 @@ impl<const BITS: u32> PackedArray<BITS> {
         }
         let per = Self::items_per_word();
         self.reserve(other_len);
-        if self.len % per == 0 {
-            // Word-aligned tail: both stores pack lanes at identical bit
-            // offsets within each word, so `other`'s packed words copy in
-            // verbatim. `other.words.len() == words_for(other_len)` by
-            // invariant, and any stale bits beyond `other_len` land beyond
-            // `self`'s new length, so they stay invisible. No per-element
-            // `push`, so advance the length explicitly.
-            self.words.extend_from_slice(&other.words);
+        if self.len % per == 0 && self.words.len() == Self::words_for(self.len)
+        {
+            // Word-aligned tight tail: both stores pack lanes at identical
+            // bit offsets within each word, so `other`'s packed words copy in
+            // verbatim. Only the words holding `other`'s valid lanes are
+            // copied (a leaked drain may have left `other` with extra stale
+            // words), and any stale bits beyond `other_len` in the last word
+            // land beyond `self`'s new length, so they stay invisible. No
+            // per-element `push`, so advance the length explicitly.
+            self.words
+                .extend_from_slice(&other.words[..Self::words_for(other_len)]);
             self.len += other_len;
         } else {
-            // Unaligned tail: merge element by element into the partial word;
-            // `push` advances the length itself.
+            // Unaligned or slack tail (stale words after a leaked drain):
+            // merge element by element; `push` advances the length itself.
             for i in 0..other_len {
                 // SAFETY: `i < other_len == other.len`.
                 self.push(unsafe { other.get_unchecked(i) });
@@ -325,9 +357,14 @@ impl<const BITS: u32> PackedArray<BITS> {
         }
         let per = Self::items_per_word();
         self.reserve(len);
-        if self.len % per == 0 && start % per == 0 {
-            // Aligned: copy whole words. Stale bits past `start + len` in the
-            // last word land beyond `self`'s new length, so stay invisible.
+        if self.len % per == 0
+            && start % per == 0
+            && self.words.len() == Self::words_for(self.len)
+        {
+            // Aligned tight tail: copy whole words. The source words exist
+            // even if `other` carries stale trailing words, and stale bits
+            // past `start + len` in the last word land beyond `self`'s new
+            // length, so stay invisible.
             let first = start / per;
             let nwords = Self::words_for(len);
             self.words
@@ -358,9 +395,11 @@ impl<const BITS: u32> PackedArray<BITS> {
             filled += 1;
         }
         // Bulk full words: `v` replicated into every lane (mask divides
-        // usize::MAX exactly for BITS in {1,2,4}).
+        // usize::MAX exactly for BITS in {1,2,4}). Requires a tight store;
+        // a slack one (stale words after a leaked drain) falls through to the
+        // per-element loop below.
         let full_words = (count - filled) / per;
-        if full_words > 0 {
+        if full_words > 0 && self.words.len() == Self::words_for(self.len) {
             let rep = v.wrapping_mul(usize::MAX / mask);
             self.words.resize(self.words.len() + full_words, rep);
             self.len += full_words * per;
@@ -552,6 +591,12 @@ pub trait BitPack: Clone + Default + core::fmt::Debug + Sized {
     fn shrink_to_fit(&mut self);
     /// Shorten the store to `new_len`, discarding trailing elements.
     fn truncate(&mut self, new_len: usize);
+    /// Set the logical length without touching the backing words.
+    ///
+    /// # Safety
+    /// Every lane `< new_len` must be backed by an allocated word and hold a
+    /// previously written value.
+    unsafe fn set_len(&mut self, new_len: usize);
     /// Read the element at `index` as a `usize`.
     fn get(&self, index: usize) -> usize;
     /// Read the element at `index` without bounds checking.
@@ -632,6 +677,11 @@ impl<const BITS: u32> BitPack for PackedArray<BITS> {
     #[inline]
     fn truncate(&mut self, new_len: usize) {
         PackedArray::truncate(self, new_len);
+    }
+    #[inline]
+    unsafe fn set_len(&mut self, new_len: usize) {
+        // SAFETY: forwarded contract.
+        unsafe { PackedArray::set_len(self, new_len) };
     }
     #[inline]
     fn get(&self, index: usize) -> usize {

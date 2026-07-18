@@ -741,10 +741,22 @@ impl<T: CompactRepr> CompactVec<T> {
             core::ops::Bound::Unbounded => self.inner.len(),
         };
         assert!(start <= end && end <= self.inner.len());
+        let old_len = self.inner.len();
+        // Leak safety (mirrors `Vec::drain`): shorten to `start` up front
+        // while the drained lanes stay alive in the backing words. `Drop`
+        // shifts the tail down and restores the final length; a leaked drain
+        // leaves a short but consistent column, so sibling columns in a
+        // generated struct-of-arrays vec can never end up longer than this
+        // one.
+        //
+        // SAFETY: `start <= old_len`, so every lane `< start` is initialized
+        // and backed (`set_len` keeps the words alive).
+        unsafe { self.inner.set_len(start) };
         CompactDrain {
             packed: &mut self.inner,
             drain_start: start,
             drain_end: end,
+            old_len,
             pos: start,
             back: end,
         }
@@ -2183,11 +2195,16 @@ impl<T: CompactRepr> ExactSizeIterator for CompactIterMut<'_, T> {}
 // ---------------------------------------------------------------------------
 
 pub struct CompactDrain<'a, T: CompactRepr> {
+    // The store's logical length was lowered to `drain_start` when the drain
+    // was created (leak safety), but every lane `< old_len` stays alive in
+    // the backing words until `Drop` shifts the tail and truncates.
     packed: &'a mut Store<T>,
     // Original drain window; used by `Drop` to shift the tail regardless of
     // how many elements were yielded by the iterator.
     drain_start: usize,
     drain_end: usize,
+    // Pre-drain length of the store.
+    old_len: usize,
     // Live iteration cursors.
     pos: usize,
     back: usize,
@@ -2198,7 +2215,12 @@ impl<T: CompactRepr> Iterator for CompactDrain<'_, T> {
     #[inline]
     fn next(&mut self) -> Option<Compact<T>> {
         if self.pos < self.back {
-            let v = Compact(T::decode(self.packed.get(self.pos)));
+            // SAFETY: `pos < back <= drain_end <= old_len`; the lane is
+            // initialized and its word stays alive for the drain's lifetime
+            // even though it sits beyond the store's lowered length.
+            let v = Compact(T::decode(unsafe {
+                self.packed.get_unchecked(self.pos)
+            }));
             self.pos += 1;
             Some(v)
         } else {
@@ -2217,7 +2239,10 @@ impl<T: CompactRepr> DoubleEndedIterator for CompactDrain<'_, T> {
     fn next_back(&mut self) -> Option<Compact<T>> {
         if self.pos < self.back {
             self.back -= 1;
-            Some(Compact(T::decode(self.packed.get(self.back))))
+            // SAFETY: as in `next`.
+            Some(Compact(T::decode(unsafe {
+                self.packed.get_unchecked(self.back)
+            })))
         } else {
             None
         }
@@ -2228,21 +2253,25 @@ impl<T: CompactRepr> ExactSizeIterator for CompactDrain<'_, T> {}
 
 impl<T: CompactRepr> Drop for CompactDrain<'_, T> {
     fn drop(&mut self) {
-        // Shift the tail [drain_end, len) down to [drain_start, ...) and drop
-        // the drained length. Uses the ORIGINAL window so this runs even after
-        // the iterator was fully (or partially) consumed.
+        // Restore the pre-drain length, shift the tail [drain_end, old_len)
+        // down to [drain_start, ...), then truncate to the final length.
+        // Uses the ORIGINAL window so this runs even after the iterator was
+        // fully (or partially) consumed; `truncate` also re-tightens the
+        // backing words.
         let drain_len = self.drain_end - self.drain_start;
-        if drain_len == 0 {
-            return;
+        let tail = self.old_len - self.drain_end;
+        // SAFETY: every lane `< old_len` is initialized and its word stayed
+        // alive while the length was lowered (`set_len` never trims words).
+        unsafe {
+            self.packed.set_len(self.old_len);
+            if drain_len > 0 {
+                for i in 0..tail {
+                    let v = self.packed.get_unchecked(self.drain_end + i);
+                    self.packed.set_unchecked(self.drain_start + i, v);
+                }
+            }
         }
-        let src = self.drain_end;
-        let dst = self.drain_start;
-        let shift = self.packed.len() - src;
-        for i in 0..shift {
-            let v = self.packed.get(src + i);
-            self.packed.set(dst + i, v);
-        }
-        self.packed.truncate(self.packed.len() - drain_len);
+        self.packed.truncate(self.old_len - drain_len);
     }
 }
 
