@@ -129,3 +129,35 @@ fn compact_bulk_ops_preserve_lanes() {
     assert_eq!(v.len(), 10);
     assert!(v.iter().all(|c| c.get()));
 }
+
+// The word-cached CompactIter must match a plain oracle forwards, backwards,
+// and when both ends are consumed interleaved (which thrashes the cache).
+#[test]
+fn compact_iter_matches_oracle_all_directions() {
+    use layout::{Compact, CompactVec};
+    for n in [0usize, 1, 63, 64, 65, 130, 200] {
+        let want: Vec<bool> =
+            (0..n).map(|i| i % 5 == 0 || i % 7 == 0).collect();
+        let v: CompactVec<bool> =
+            want.iter().map(|&b| Compact::new(b)).collect();
+
+        assert!(v.iter().map(|c| c.get()).eq(want.iter().copied()));
+        assert!(v
+            .iter()
+            .rev()
+            .map(|c| c.get())
+            .eq(want.iter().rev().copied()));
+
+        let mut it = v.iter();
+        let mut front = Vec::new();
+        let mut back = Vec::new();
+        while let Some(c) = it.next() {
+            front.push(c.get());
+            if let Some(c) = it.next_back() {
+                back.push(c.get());
+            }
+        }
+        front.extend(back.into_iter().rev());
+        assert_eq!(front, want, "interleaved n={n}");
+    }
+}

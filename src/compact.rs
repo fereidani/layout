@@ -614,12 +614,7 @@ impl<T: CompactRepr> CompactVec<T> {
     /// `for x in &compact_vec` compile.
     #[inline]
     pub fn iter(&self) -> CompactIter<'_, T> {
-        CompactIter {
-            packed: &self.inner as *const Store<T>,
-            pos: 0,
-            end: self.inner.len(),
-            _marker: PhantomData,
-        }
+        CompactIter::new(&self.inner as *const Store<T>, 0, self.inner.len())
     }
 
     /// Iterate by mutable handle over the column (analogous to
@@ -1077,12 +1072,7 @@ impl<'a, T: CompactRepr> CompactSlice<'a, T> {
     }
 
     pub fn iter(&self) -> CompactIter<'a, T> {
-        CompactIter {
-            packed: self.packed,
-            pos: self.start,
-            end: self.start + self.len,
-            _marker: PhantomData,
-        }
+        CompactIter::new(self.packed, self.start, self.start + self.len)
     }
 
     pub fn to_vec(&self) -> CompactVec<T> {
@@ -1528,12 +1518,11 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
     }
 
     pub fn iter(&self) -> CompactIter<'_, T> {
-        CompactIter {
-            packed: self.packed as *const Store<T>,
-            pos: self.start,
-            end: self.start + self.len,
-            _marker: PhantomData,
-        }
+        CompactIter::new(
+            self.packed as *const Store<T>,
+            self.start,
+            self.start + self.len,
+        )
     }
 
     pub fn iter_mut(&mut self) -> CompactIterMut<'_, T> {
@@ -2008,7 +1997,40 @@ pub struct CompactIter<'a, T: CompactRepr> {
     packed: *const Store<T>,
     pos: usize,
     end: usize,
+    // Cached raw word and the word index it holds (`usize::MAX` = none), so a
+    // run of elements in one word is read from memory once. Sound because the
+    // iterator holds a shared borrow, so the storage cannot change.
+    cur_word: usize,
+    cur_wi: usize,
     _marker: PhantomData<&'a Store<T>>,
+}
+
+impl<'a, T: CompactRepr> CompactIter<'a, T> {
+    #[inline]
+    fn new(packed: *const Store<T>, pos: usize, end: usize) -> Self {
+        Self {
+            packed,
+            pos,
+            end,
+            cur_word: 0,
+            cur_wi: usize::MAX,
+            _marker: PhantomData,
+        }
+    }
+
+    #[inline]
+    fn lane(&mut self, i: usize) -> Compact<T> {
+        let per = (usize::BITS / T::BITS) as usize;
+        let wi = i / per;
+        if wi != self.cur_wi {
+            // SAFETY: `i < end <= len`, so `wi` indexes a live word.
+            self.cur_word = unsafe { (*self.packed).word(wi) };
+            self.cur_wi = wi;
+        }
+        let off = (i % per) * T::BITS as usize;
+        let raw = (self.cur_word >> off) & ((1usize << T::BITS) - 1);
+        Compact(T::decode(raw))
+    }
 }
 
 impl<'a, T: CompactRepr> Iterator for CompactIter<'a, T> {
@@ -2016,9 +2038,7 @@ impl<'a, T: CompactRepr> Iterator for CompactIter<'a, T> {
     #[inline]
     fn next(&mut self) -> Option<Compact<T>> {
         if self.pos < self.end {
-            // SAFETY: `pos < end`, and a non-empty range implies the iterator
-            // was built from valid storage.
-            let v = unsafe { Compact(T::decode((*self.packed).get(self.pos))) };
+            let v = self.lane(self.pos);
             self.pos += 1;
             Some(v)
         } else {
@@ -2037,8 +2057,7 @@ impl<'a, T: CompactRepr> DoubleEndedIterator for CompactIter<'a, T> {
     fn next_back(&mut self) -> Option<Compact<T>> {
         if self.pos < self.end {
             self.end -= 1;
-            // SAFETY: `end` is still within the valid range.
-            Some(unsafe { Compact(T::decode((*self.packed).get(self.end))) })
+            Some(self.lane(self.end))
         } else {
             None
         }
