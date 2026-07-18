@@ -330,6 +330,40 @@ pub fn __invert_permutation(argsort: &[usize]) -> Vec<usize> {
     dest
 }
 
+/// A bit-packed visited set for the in-place permutation walkers: 8x smaller
+/// than a `Vec<bool>`, so the random-access cycle walk touches fewer cache
+/// lines.
+pub(crate) struct VisitedBits {
+    words: Vec<usize>,
+}
+
+impl VisitedBits {
+    const W: usize = usize::BITS as usize;
+
+    #[inline]
+    pub(crate) fn new(len: usize) -> Self {
+        // `div_ceil` is not available at the crate's MSRV (1.71).
+        Self {
+            words: alloc::vec![0usize; (len + Self::W - 1) / Self::W],
+        }
+    }
+
+    #[inline]
+    pub(crate) fn test(&self, i: usize) -> bool {
+        (self.words[i / Self::W] >> (i % Self::W)) & 1 != 0
+    }
+
+    #[inline]
+    pub(crate) fn set(&mut self, i: usize) {
+        self.words[i / Self::W] |= 1 << (i % Self::W);
+    }
+
+    #[inline]
+    pub(crate) fn clear(&mut self) {
+        self.words.fill(0);
+    }
+}
+
 /// Apply a destination permutation in place: `dest[i]` is the index the
 /// element at `i` should move to. Used by generated code for plain `&mut [T]`
 /// columns. Follows each cycle moving values (works for non-`Copy` `T`).
@@ -347,21 +381,21 @@ pub fn __apply_permutation_inplace<T>(slice: &mut [T], dest: &[usize]) {
         "permutation length {} does not match slice length {len}",
         dest.len()
     );
-    let mut visited = alloc::vec![false; len];
+    let mut visited = VisitedBits::new(len);
     for &d in dest {
         assert!(d < len, "index {d} out of bounds for length {len}");
         assert!(
-            !visited[d],
+            !visited.test(d),
             "duplicate index {d}: indices must form a permutation"
         );
-        visited[d] = true;
+        visited.set(d);
     }
-    visited.fill(false);
+    visited.clear();
     for start in 0..len {
-        if visited[start] {
+        if visited.test(start) {
             continue;
         }
-        visited[start] = true;
+        visited.set(start);
         let mut current = start;
         // SAFETY: `current` walks the cycle start -> dest[start] -> ...; every
         // index is visited exactly once. `temp` always holds the value that
@@ -377,7 +411,7 @@ pub fn __apply_permutation_inplace<T>(slice: &mut [T], dest: &[usize]) {
                     break;
                 }
                 temp = core::ptr::replace(&mut slice[next], temp);
-                visited[next] = true;
+                visited.set(next);
                 current = next;
             }
         }

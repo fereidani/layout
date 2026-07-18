@@ -143,6 +143,18 @@ fn compact_eq(b: &mut Bencher) {
     b.iter(|| black_box(x == y));
 }
 
+// --- permutation apply (in-place reverse, no clone per iteration) ---
+
+fn apply_index_reverse(b: &mut Bencher) {
+    use layout::SoAVec;
+    let mut v = build_particles(N);
+    let perm: Vec<usize> = (0..N).rev().collect();
+    b.iter(|| {
+        v.apply_index(&perm);
+        black_box(&v);
+    });
+}
+
 benchmark_group!(
     perf,
     from_iter_exact,
@@ -156,6 +168,7 @@ benchmark_group!(
     plain_bytes_clone,
     compact_iter_count,
     compact_count_specialized,
-    compact_eq
+    compact_eq,
+    apply_index_reverse
 );
 benchmark_main!(perf);
