@@ -467,6 +467,59 @@ pub unsafe fn __apply_permutation_inplace_unchecked<T>(
     }
 }
 
+/// Cursor advance for the generated single-counter iterators.
+///
+/// A generated iterator holds one remaining-length counter plus one
+/// sub-iterator per column; `next` checks the counter once and then advances
+/// every column through this trait, so each element costs a single bounds
+/// decision regardless of column count (a zip chain would re-check every
+/// column). Implemented for `slice::Iter`/`IterMut`, the compact column
+/// iterators, and the generated iterators themselves (nested SoA fields).
+#[doc(hidden)]
+pub trait SoACursor {
+    type Item;
+    /// Yield the next front element without checking for exhaustion.
+    ///
+    /// # Safety
+    /// The total number of `cursor_next` and `cursor_next_back` calls must
+    /// not exceed the cursor's initial length.
+    unsafe fn cursor_next(&mut self) -> Self::Item;
+    /// Yield the next back element without checking for exhaustion.
+    ///
+    /// # Safety
+    /// As [`cursor_next`](Self::cursor_next).
+    unsafe fn cursor_next_back(&mut self) -> Self::Item;
+}
+
+impl<'a, T> SoACursor for core::slice::Iter<'a, T> {
+    type Item = &'a T;
+    #[inline(always)]
+    unsafe fn cursor_next(&mut self) -> &'a T {
+        // SAFETY: the caller guarantees the iterator is not exhausted, so the
+        // `None` arm is unreachable and its check folds away.
+        unsafe { self.next().unwrap_unchecked() }
+    }
+    #[inline(always)]
+    unsafe fn cursor_next_back(&mut self) -> &'a T {
+        // SAFETY: as above.
+        unsafe { self.next_back().unwrap_unchecked() }
+    }
+}
+
+impl<'a, T> SoACursor for core::slice::IterMut<'a, T> {
+    type Item = &'a mut T;
+    #[inline(always)]
+    unsafe fn cursor_next(&mut self) -> &'a mut T {
+        // SAFETY: as for `slice::Iter`.
+        unsafe { self.next().unwrap_unchecked() }
+    }
+    #[inline(always)]
+    unsafe fn cursor_next_back(&mut self) -> &'a mut T {
+        // SAFETY: as for `slice::Iter`.
+        unsafe { self.next_back().unwrap_unchecked() }
+    }
+}
+
 /// Any struct derived by SOA will auto impl this trait You can use
 /// `<Cheese as SOA>::Type` instead of explicit named type
 /// `CheeseVec`; This will helpful in generics programing that generate struct

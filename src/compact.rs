@@ -2091,11 +2091,14 @@ pub struct CompactIter<'a, T: CompactRepr> {
     packed: *const Store<T>,
     pos: usize,
     end: usize,
-    // Cached raw word and the word index it holds (`usize::MAX` = none), so a
-    // run of elements in one word is read from memory once. Sound because the
-    // iterator holds a shared borrow, so the storage cannot change.
+    // Forward read cache: the current word pre-shifted so the lane at `pos`
+    // sits in the low `BITS` bits, with `avail` lanes left in it (0 forces a
+    // reload). Each forward step is then one mask and one constant shift;
+    // memory is touched once per word. Sound because the iterator holds a
+    // shared borrow, so the storage cannot change. Back reads go straight to
+    // memory and leave the cache alone.
     cur_word: usize,
-    cur_wi: usize,
+    avail: usize,
     _marker: PhantomData<&'a Store<T>>,
 }
 
@@ -2107,23 +2110,47 @@ impl<'a, T: CompactRepr> CompactIter<'a, T> {
             pos,
             end,
             cur_word: 0,
-            cur_wi: usize::MAX,
+            avail: 0,
             _marker: PhantomData,
         }
     }
 
-    #[inline]
-    fn lane(&mut self, i: usize) -> Compact<T> {
+    /// Read the lane at `pos` and advance, reloading the shifted word cache
+    /// at word boundaries.
+    ///
+    /// # Safety
+    ///
+    /// `pos < end` must hold (the lane is within the live storage).
+    #[inline(always)]
+    unsafe fn read_front(&mut self) -> Compact<T> {
         let per = (usize::BITS / T::BITS) as usize;
-        let wi = i / per;
-        if wi != self.cur_wi {
-            // SAFETY: `i < end <= len`, so `wi` indexes a live word.
-            self.cur_word = unsafe { (*self.packed).word(wi) };
-            self.cur_wi = wi;
+        if self.avail == 0 {
+            let off = self.pos % per;
+            // SAFETY: `pos < end <= len`, so the word is live.
+            self.cur_word = unsafe { (*self.packed).word(self.pos / per) }
+                >> (off * T::BITS as usize);
+            self.avail = per - off;
         }
-        let off = (i % per) * T::BITS as usize;
-        let raw = (self.cur_word >> off) & ((1usize << T::BITS) - 1);
+        let raw = self.cur_word & ((1usize << T::BITS) - 1);
+        self.cur_word >>= T::BITS;
+        self.avail -= 1;
+        self.pos += 1;
         Compact(T::decode(raw))
+    }
+
+    /// Step the back end down and read that lane directly (uncached).
+    ///
+    /// # Safety
+    ///
+    /// `pos < end` must hold.
+    #[inline]
+    unsafe fn read_back(&mut self) -> Compact<T> {
+        self.end -= 1;
+        let per = (usize::BITS / T::BITS) as usize;
+        let off = (self.end % per) * T::BITS as usize;
+        // SAFETY: `end` was within the live storage.
+        let word = unsafe { (*self.packed).word(self.end / per) };
+        Compact(T::decode((word >> off) & ((1usize << T::BITS) - 1)))
     }
 }
 
@@ -2132,9 +2159,8 @@ impl<'a, T: CompactRepr> Iterator for CompactIter<'a, T> {
     #[inline]
     fn next(&mut self) -> Option<Compact<T>> {
         if self.pos < self.end {
-            let v = self.lane(self.pos);
-            self.pos += 1;
-            Some(v)
+            // SAFETY: `pos < end` just checked.
+            Some(unsafe { self.read_front() })
         } else {
             None
         }
@@ -2144,14 +2170,18 @@ impl<'a, T: CompactRepr> Iterator for CompactIter<'a, T> {
         let r = self.end - self.pos;
         (r, Some(r))
     }
+    #[inline]
+    fn count(self) -> usize {
+        self.end - self.pos
+    }
 }
 
 impl<'a, T: CompactRepr> DoubleEndedIterator for CompactIter<'a, T> {
     #[inline]
     fn next_back(&mut self) -> Option<Compact<T>> {
         if self.pos < self.end {
-            self.end -= 1;
-            Some(self.lane(self.end))
+            // SAFETY: `pos < end` just checked.
+            Some(unsafe { self.read_back() })
         } else {
             None
         }
@@ -2159,6 +2189,21 @@ impl<'a, T: CompactRepr> DoubleEndedIterator for CompactIter<'a, T> {
 }
 
 impl<T: CompactRepr> ExactSizeIterator for CompactIter<'_, T> {}
+
+impl<'a, T: CompactRepr> crate::SoACursor for CompactIter<'a, T> {
+    type Item = Compact<T>;
+    #[inline(always)]
+    unsafe fn cursor_next(&mut self) -> Compact<T> {
+        // SAFETY: the caller's length contract replaces the `pos < end`
+        // check.
+        unsafe { self.read_front() }
+    }
+    #[inline(always)]
+    unsafe fn cursor_next_back(&mut self) -> Compact<T> {
+        // SAFETY: as in `cursor_next`.
+        unsafe { self.read_back() }
+    }
+}
 
 pub struct CompactIterMut<'a, T: CompactRepr> {
     packed: *mut Store<T>,
@@ -2204,6 +2249,24 @@ impl<'a, T: CompactRepr> DoubleEndedIterator for CompactIterMut<'a, T> {
 }
 
 impl<T: CompactRepr> ExactSizeIterator for CompactIterMut<'_, T> {}
+
+impl<'a, T: CompactRepr> crate::SoACursor for CompactIterMut<'a, T> {
+    type Item = CompactRefMut<'a, T>;
+    #[inline(always)]
+    unsafe fn cursor_next(&mut self) -> CompactRefMut<'a, T> {
+        let i = self.pos;
+        self.pos += 1;
+        // SAFETY: the caller's length contract keeps `i` within the
+        // iterator's range of the live storage.
+        unsafe { CompactRefMut::from_packed_ptr(self.packed, i) }
+    }
+    #[inline(always)]
+    unsafe fn cursor_next_back(&mut self) -> CompactRefMut<'a, T> {
+        self.end -= 1;
+        // SAFETY: as in `cursor_next`.
+        unsafe { CompactRefMut::from_packed_ptr(self.packed, self.end) }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // CompactDrain

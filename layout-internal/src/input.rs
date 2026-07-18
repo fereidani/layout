@@ -257,7 +257,7 @@ impl Input {
         &'a self,
         nested: A,
         not_nested: B,
-    ) -> impl TokenStreamIterator + 'a
+    ) -> impl Iterator<Item = TokenStream> + 'a
     where
         A: Fn(&syn::Ident, &syn::Type, Option<&syn::Type>) -> TokenStream + 'a,
         B: Fn(&syn::Ident, &syn::Type) -> TokenStream + 'a,
@@ -280,51 +280,5 @@ impl Input {
                     )
                 }
             })
-    }
-}
-
-pub(crate) trait TokenStreamIterator:
-    Iterator<Item = proc_macro2::TokenStream>
-{
-    fn concat_by(
-        self,
-        f: impl Fn(
-            proc_macro2::TokenStream,
-            proc_macro2::TokenStream,
-        ) -> proc_macro2::TokenStream,
-    ) -> proc_macro2::TokenStream;
-}
-
-impl<T: Iterator<Item = proc_macro2::TokenStream>> TokenStreamIterator for T {
-    fn concat_by(
-        mut self,
-        f: impl Fn(
-            proc_macro2::TokenStream,
-            proc_macro2::TokenStream,
-        ) -> proc_macro2::TokenStream,
-    ) -> proc_macro2::TokenStream {
-        match self.next() {
-            Some(first) => self.fold(first, f),
-            None => quote! {},
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn concat_by() {
-        let token_streams = vec![quote! {a}, quote! {b}, quote! {c}];
-        assert_eq!(
-            token_streams
-                .into_iter()
-                .concat_by(|current, next| {
-                    quote! {(#current, #next)}
-                })
-                .to_string(),
-            "((a , b) , c)"
-        );
     }
 }

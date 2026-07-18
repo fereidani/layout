@@ -1,10 +1,7 @@
-use proc_macro2::TokenStream;
+use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
 
-use crate::{
-    input::{Input, TokenStreamIterator},
-    names,
-};
+use crate::{input::Input, names};
 
 pub fn derive(input: &Input) -> TokenStream {
     let name = &input.name;
@@ -33,74 +30,39 @@ pub fn derive(input: &Input) -> TokenStream {
         .map(|field| field.ty.clone())
         .collect::<Vec<_>>();
 
-    let iter_type = input
+    // Remaining-length counter; hygienic name so it cannot collide with a
+    // user field.
+    let rem = Ident::new("___layout_private_rem", Span::call_site());
+
+    let iter_fields_types = input
         .map_fields_nested_or(
             |_, field_type, _| quote! { <#field_type as layout::SoAIter<'a>>::Iter },
             |_, field_type| quote! { ::core::slice::Iter<'a, #field_type> },
         )
-        .concat_by(|seq, next| {
-            quote! { ::core::iter::Zip<#seq, #next> }
-        });
+        .collect::<Vec<_>>();
 
-    let iter_mut_type = input
+    let iter_mut_fields_types = input
         .map_fields_nested_or(
             |_, field_type, _| quote! { <#field_type as layout::SoAIter<'a>>::IterMut },
             |_, field_type| quote! { ::core::slice::IterMut<'a, #field_type> },
         )
-        .concat_by(|seq, next| {
-            quote! { ::core::iter::Zip<#seq, #next> }
-        });
+        .collect::<Vec<_>>();
 
-    let create_into_iter = input
+    // Sub-iterator construction: consuming a slice moves compact/nested
+    // fields into their owning iterators; borrowing paths reborrow.
+    let into_iter_fields = input
         .map_fields_nested_or(
             |ident, _, _| quote! { self.#ident.into_iter() },
             |ident, _| quote! { self.#ident.iter() },
         )
-        .concat_by(|seq, next| {
-            quote! { #seq.zip(#next) }
-        });
+        .collect::<Vec<_>>();
 
-    let create_mut_into_iter = input
+    let into_iter_mut_fields = input
         .map_fields_nested_or(
             |ident, _, _| quote! { self.#ident.into_iter() },
             |ident, _| quote! { self.#ident.iter_mut() },
         )
-        .concat_by(|seq, next| {
-            quote! { #seq.zip(#next) }
-        });
-
-    let iter_pat = fields_names
-        .iter()
-        .fold(None, |seq, ident| {
-            if let Some(seq) = seq {
-                Some(quote! { (#seq, #ident) })
-            } else {
-                Some(quote! { #ident })
-            }
-        })
-        .expect("should be Some");
-
-    let create_iter = fields_names
-        .iter()
-        .fold(None, |seq, ident| {
-            if let Some(seq) = seq {
-                Some(quote! { #seq.zip(self.#ident.iter()) })
-            } else {
-                Some(quote! { self.#ident.iter() })
-            }
-        })
-        .expect("should be Some");
-
-    let create_iter_mut = fields_names
-        .iter()
-        .fold(None, |seq, ident| {
-            if let Some(seq) = seq {
-                Some(quote! { #seq.zip(self.#ident.iter_mut()) })
-            } else {
-                Some(quote! { self.#ident.iter_mut() })
-            }
-        })
-        .expect("should be Some");
+        .collect::<Vec<_>>();
 
     // The Ref construction sites below use trailing-comma field-init shorthand,
     // so the marker init carries no leading comma. Only non-empty for
@@ -114,42 +76,97 @@ pub fn derive(input: &Input) -> TokenStream {
     let generated = quote! {
         /// Iterator over
         #[doc = #doc_url]
+        ///
+        /// Holds one remaining-length counter and one cursor per column, so
+        /// each element costs a single bounds decision regardless of the
+        /// number of columns.
         #[allow(missing_debug_implementations)]
-        #visibility struct #iter_name<'a>(#iter_type);
+        #visibility struct #iter_name<'a> {
+            #rem: usize,
+            #( #fields_names: #iter_fields_types, )*
+        }
 
         impl<'a> Iterator for #iter_name<'a> {
             type Item = #ref_name<'a>;
 
             #[inline]
             fn next(&mut self) -> Option<#ref_name<'a>> {
-                match self.0.next() {
-                    Some(#iter_pat) => Some(#ref_name { #(#fields_names,)* #ref_marker_init }),
-                    None => None,
+                if self.#rem == 0 {
+                    return None;
+                }
+                self.#rem -= 1;
+                // SAFETY: `rem` was positive, so every column cursor has at
+                // least one front element left (all columns share one
+                // length).
+                unsafe {
+                    Some(#ref_name {
+                        #( #fields_names: ::layout::SoACursor::cursor_next(&mut self.#fields_names), )*
+                        #ref_marker_init
+                    })
                 }
             }
 
             #[inline]
             fn size_hint(&self) -> (usize, Option<usize>) {
-                self.0.size_hint()
+                (self.#rem, Some(self.#rem))
+            }
+
+            #[inline]
+            fn count(self) -> usize {
+                self.#rem
             }
         }
 
         impl<'a> DoubleEndedIterator for #iter_name<'a> {
             #[inline]
             fn next_back(&mut self) -> Option<#ref_name<'a>> {
-                self.0.next_back().map(|#iter_pat|
-                    #ref_name{
-                        #(#fields_names,)*
+                if self.#rem == 0 {
+                    return None;
+                }
+                self.#rem -= 1;
+                // SAFETY: as in `next`, for the back end.
+                unsafe {
+                    Some(#ref_name {
+                        #( #fields_names: ::layout::SoACursor::cursor_next_back(&mut self.#fields_names), )*
                         #ref_marker_init
-                    }
-                )
+                    })
+                }
             }
         }
 
         impl<'a> ExactSizeIterator for #iter_name<'a> {
             #[inline]
             fn len(&self) -> usize {
-                self.0.len()
+                self.#rem
+            }
+        }
+
+        impl<'a> ::layout::SoACursor for #iter_name<'a> {
+            type Item = #ref_name<'a>;
+
+            #[inline(always)]
+            unsafe fn cursor_next(&mut self) -> #ref_name<'a> {
+                // Driven as a nested column by an enclosing single-counter
+                // iterator; the parent's counter carries the length
+                // guarantee, so `rem` is not maintained here.
+                // SAFETY: forwarded caller contract.
+                unsafe {
+                    #ref_name {
+                        #( #fields_names: ::layout::SoACursor::cursor_next(&mut self.#fields_names), )*
+                        #ref_marker_init
+                    }
+                }
+            }
+
+            #[inline(always)]
+            unsafe fn cursor_next_back(&mut self) -> #ref_name<'a> {
+                // SAFETY: forwarded caller contract.
+                unsafe {
+                    #ref_name {
+                        #( #fields_names: ::layout::SoACursor::cursor_next_back(&mut self.#fields_names), )*
+                        #ref_marker_init
+                    }
+                }
             }
         }
 
@@ -169,7 +186,7 @@ pub fn derive(input: &Input) -> TokenStream {
             /// in this slice.
             #[inline]
             pub fn iter(&self) -> #iter_name {
-                #iter_name(#create_iter)
+                self.reborrow().into_iter()
             }
 
             /// Get an iterator over the
@@ -177,46 +194,101 @@ pub fn derive(input: &Input) -> TokenStream {
             /// in this slice.
             #[inline]
             pub fn into_iter(self) -> #iter_name<'a> {
-                #iter_name(#create_into_iter)
+                #iter_name {
+                    #rem: self.len(),
+                    #( #fields_names: #into_iter_fields, )*
+                }
             }
         }
 
         /// Mutable iterator over
         #[doc = #doc_url]
+        ///
+        /// Holds one remaining-length counter and one cursor per column, so
+        /// each element costs a single bounds decision regardless of the
+        /// number of columns.
         #[allow(missing_debug_implementations)]
-        #visibility struct #iter_mut_name<'a>(#iter_mut_type);
+        #visibility struct #iter_mut_name<'a> {
+            #rem: usize,
+            #( #fields_names: #iter_mut_fields_types, )*
+        }
 
         impl<'a> Iterator for #iter_mut_name<'a> {
             type Item = #ref_mut_name<'a>;
 
             #[inline]
             fn next(&mut self) -> Option<#ref_mut_name<'a>> {
-                match self.0.next() {
-                    Some(#iter_pat) => Some(#ref_mut_name { #(#fields_names,)* }),
-                    None => None,
+                if self.#rem == 0 {
+                    return None;
+                }
+                self.#rem -= 1;
+                // SAFETY: `rem` was positive, so every column cursor has at
+                // least one front element left (all columns share one
+                // length).
+                unsafe {
+                    Some(#ref_mut_name {
+                        #( #fields_names: ::layout::SoACursor::cursor_next(&mut self.#fields_names), )*
+                    })
                 }
             }
 
             #[inline]
             fn size_hint(&self) -> (usize, Option<usize>) {
-                self.0.size_hint()
+                (self.#rem, Some(self.#rem))
+            }
+
+            #[inline]
+            fn count(self) -> usize {
+                self.#rem
             }
         }
 
         impl<'a> DoubleEndedIterator for #iter_mut_name<'a> {
             #[inline]
             fn next_back(&mut self) -> Option<#ref_mut_name<'a>> {
-                self.0.next_back().map(|#iter_pat|
-                    #ref_mut_name{
-                        #(#fields_names,)*
-                    }
-                )
+                if self.#rem == 0 {
+                    return None;
+                }
+                self.#rem -= 1;
+                // SAFETY: as in `next`, for the back end.
+                unsafe {
+                    Some(#ref_mut_name {
+                        #( #fields_names: ::layout::SoACursor::cursor_next_back(&mut self.#fields_names), )*
+                    })
+                }
             }
         }
+
         impl<'a> ExactSizeIterator for #iter_mut_name<'a> {
             #[inline]
             fn len(&self) -> usize {
-                self.0.len()
+                self.#rem
+            }
+        }
+
+        impl<'a> ::layout::SoACursor for #iter_mut_name<'a> {
+            type Item = #ref_mut_name<'a>;
+
+            #[inline(always)]
+            unsafe fn cursor_next(&mut self) -> #ref_mut_name<'a> {
+                // See the immutable cursor impl: the enclosing iterator's
+                // counter carries the length guarantee.
+                // SAFETY: forwarded caller contract.
+                unsafe {
+                    #ref_mut_name {
+                        #( #fields_names: ::layout::SoACursor::cursor_next(&mut self.#fields_names), )*
+                    }
+                }
+            }
+
+            #[inline(always)]
+            unsafe fn cursor_next_back(&mut self) -> #ref_mut_name<'a> {
+                // SAFETY: forwarded caller contract.
+                unsafe {
+                    #ref_mut_name {
+                        #( #fields_names: ::layout::SoACursor::cursor_next_back(&mut self.#fields_names), )*
+                    }
+                }
             }
         }
 
@@ -244,7 +316,7 @@ pub fn derive(input: &Input) -> TokenStream {
             /// in this vector
             #[inline]
             pub fn iter_mut(&mut self) -> #iter_mut_name {
-                #iter_mut_name(#create_iter_mut)
+                self.reborrow().into_iter()
             }
 
             /// Get a mutable iterator over the
@@ -252,7 +324,10 @@ pub fn derive(input: &Input) -> TokenStream {
             /// in this vector
             #[inline]
             pub fn into_iter(self) -> #iter_mut_name<'a> {
-                #iter_mut_name(#create_mut_into_iter)
+                #iter_mut_name {
+                    #rem: self.len(),
+                    #( #fields_names: #into_iter_mut_fields, )*
+                }
             }
         }
 
@@ -268,7 +343,7 @@ pub fn derive(input: &Input) -> TokenStream {
             type IntoIter = #iter_name<'a>;
             #[inline]
             fn into_iter(self) -> Self::IntoIter {
-                #iter_name(#create_into_iter)
+                #slice_name::into_iter(self)
             }
         }
 
@@ -290,7 +365,7 @@ pub fn derive(input: &Input) -> TokenStream {
             type IntoIter = #iter_name<'a>;
             #[inline]
             fn into_iter(self) -> Self::IntoIter {
-                #iter_name(#create_into_iter)
+                self.reborrow().into_iter()
             }
         }
 
@@ -308,7 +383,7 @@ pub fn derive(input: &Input) -> TokenStream {
             type IntoIter = #iter_mut_name<'a>;
             #[inline]
             fn into_iter(self) -> Self::IntoIter {
-                #iter_mut_name(#create_mut_into_iter)
+                #slice_mut_name::into_iter(self)
             }
         }
 
