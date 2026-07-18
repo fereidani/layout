@@ -332,8 +332,10 @@ pub fn __invert_permutation(argsort: &[usize]) -> Vec<usize> {
 
 /// A bit-packed visited set for the in-place permutation walkers: 8x smaller
 /// than a `Vec<bool>`, so the random-access cycle walk touches fewer cache
-/// lines.
-pub(crate) struct VisitedBits {
+/// lines. Public (hidden) so generated code can allocate one scratch set and
+/// reuse it across every column of a sort.
+#[doc(hidden)]
+pub struct VisitedBits {
     words: Vec<usize>,
 }
 
@@ -341,7 +343,7 @@ impl VisitedBits {
     const W: usize = usize::BITS as usize;
 
     #[inline]
-    pub(crate) fn new(len: usize) -> Self {
+    pub fn new(len: usize) -> Self {
         // `div_ceil` is not available at the crate's MSRV (1.71).
         Self {
             words: alloc::vec![0usize; (len + Self::W - 1) / Self::W],
@@ -349,33 +351,32 @@ impl VisitedBits {
     }
 
     #[inline]
-    pub(crate) fn test(&self, i: usize) -> bool {
+    pub fn test(&self, i: usize) -> bool {
         (self.words[i / Self::W] >> (i % Self::W)) & 1 != 0
     }
 
     #[inline]
-    pub(crate) fn set(&mut self, i: usize) {
+    pub fn set(&mut self, i: usize) {
         self.words[i / Self::W] |= 1 << (i % Self::W);
     }
 
     #[inline]
-    pub(crate) fn clear(&mut self) {
+    pub fn clear(&mut self) {
         self.words.fill(0);
     }
 }
 
-/// Apply a destination permutation in place: `dest[i]` is the index the
-/// element at `i` should move to. Used by generated code for plain `&mut [T]`
-/// columns. Follows each cycle moving values (works for non-`Copy` `T`).
+/// Validate that `dest` is a permutation of `0..len`: matching length, every
+/// index in range, no duplicates. Panics otherwise. Returns the (fully set)
+/// visited bitmap so the caller can reuse the allocation as cycle-walk
+/// scratch for every column.
 #[doc(hidden)]
-pub fn __apply_permutation_inplace<T>(slice: &mut [T], dest: &[usize]) {
-    let len = slice.len();
-    // The cycle-walk below `ptr::read`s elements out of the slice, so every
-    // precondition must hold *before* it starts: a wrong-length or
-    // non-permutation `dest` would otherwise panic mid-cycle while a bitwise
-    // duplicate of a non-`Copy` element is live (double drop on unwind), or
-    // walk a cycle that never closes. Validate eagerly; the `visited` bitmap
-    // is reused for the walk afterwards.
+pub fn __validate_permutation(dest: &[usize], len: usize) -> VisitedBits {
+    // The unchecked cycle-walks `ptr::read` elements out of the columns, so
+    // every precondition must hold *before* any of them starts: a
+    // wrong-length or non-permutation `dest` would otherwise panic mid-cycle
+    // while a bitwise duplicate of a non-`Copy` element is live (double drop
+    // on unwind), or walk a cycle that never closes.
     assert!(
         dest.len() == len,
         "permutation length {} does not match slice length {len}",
@@ -390,7 +391,54 @@ pub fn __apply_permutation_inplace<T>(slice: &mut [T], dest: &[usize]) {
         );
         visited.set(d);
     }
+    visited
+}
+
+/// Invert an argsort into a destination permutation without validating it:
+/// `argsort[pos] = src` becomes `dest[src] = pos`. The caller must pass a
+/// reordered `0..len` sequence (as produced by sorting a collected range);
+/// out-of-range sources panic on the (checked) `dest` write.
+#[doc(hidden)]
+pub fn __argsort_to_dest(argsort: &[usize]) -> Vec<usize> {
+    let mut dest = alloc::vec![0usize; argsort.len()];
+    for (pos, &src) in argsort.iter().enumerate() {
+        dest[src] = pos;
+    }
+    dest
+}
+
+/// As [`__argsort_to_dest`], reading the source index from the second slot
+/// of pre-computed `(key, index)` pairs.
+#[doc(hidden)]
+pub fn __keyed_to_dest<K>(keyed: &[(K, usize)]) -> Vec<usize> {
+    let mut dest = alloc::vec![0usize; keyed.len()];
+    for (pos, (_, src)) in keyed.iter().enumerate() {
+        dest[*src] = pos;
+    }
+    dest
+}
+
+/// Apply a destination permutation in place without re-validating it:
+/// `dest[i]` is the index the element at `i` should move to. Used by
+/// generated code for plain `&mut [T]` columns, after one composite-level
+/// validation covers every column. Follows each cycle moving values (works
+/// for non-`Copy` `T`).
+///
+/// # Safety
+///
+/// `dest` must be a permutation of `0..slice.len()` (equal length, every
+/// index in range, no duplicates) and `visited` must have been created with
+/// capacity for at least `slice.len()` bits. A non-permutation `dest` walks
+/// out of bounds or duplicates non-`Copy` elements.
+#[doc(hidden)]
+pub unsafe fn __apply_permutation_inplace_unchecked<T>(
+    slice: &mut [T],
+    dest: &[usize],
+    visited: &mut VisitedBits,
+) {
+    let len = slice.len();
     visited.clear();
+    let base = slice.as_mut_ptr();
     for start in 0..len {
         if visited.test(start) {
             continue;
@@ -398,19 +446,20 @@ pub fn __apply_permutation_inplace<T>(slice: &mut [T], dest: &[usize]) {
         visited.set(start);
         let mut current = start;
         // SAFETY: `current` walks the cycle start -> dest[start] -> ...; every
-        // index is visited exactly once. `temp` always holds the value that
-        // belongs at the next slot; we move it in and keep the displaced value,
-        // closing the cycle by writing into `start` when we return to it. No
-        // panic can occur inside this block, so no slot is left uninitialized.
+        // index is visited exactly once and is `< len` per the caller's
+        // permutation contract. `temp` always holds the value that belongs at
+        // the next slot; we move it in and keep the displaced value, closing
+        // the cycle by writing into `start` when we return to it. No panic
+        // can occur inside this block, so no slot is left uninitialized.
         unsafe {
-            let mut temp = core::ptr::read(&slice[start]);
+            let mut temp = core::ptr::read(base.add(start));
             loop {
-                let next = dest[current];
+                let next = *dest.get_unchecked(current);
                 if next == start {
-                    core::ptr::write(&mut slice[start], temp);
+                    core::ptr::write(base.add(start), temp);
                     break;
                 }
-                temp = core::ptr::replace(&mut slice[next], temp);
+                temp = core::ptr::replace(base.add(next), temp);
                 visited.set(next);
                 current = next;
             }

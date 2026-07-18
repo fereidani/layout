@@ -173,8 +173,20 @@ pub fn derive_slice_mut(input: &Input) -> TokenStream {
 
             #[inline]
             fn apply_index(&mut self, indices: &[usize]) {
+                assert!(
+                    indices.len() == self.len(),
+                    "permutation length {} does not match slice length {}",
+                    indices.len(),
+                    self.len()
+                );
                 let dest = ::layout::__invert_permutation(indices);
-                self.__private_apply_permutation(&dest);
+                let mut visited = ::layout::VisitedBits::new(dest.len());
+                // SAFETY: the length was asserted above and
+                // `__invert_permutation` validated `indices` as a
+                // permutation, so `dest` is a permutation of `0..len`.
+                unsafe {
+                    self.__private_apply_permutation_unchecked(&dest, &mut visited);
+                }
             }
 
             #[inline]

@@ -634,10 +634,10 @@ pub fn derive_mut(input: &Input) -> TokenStream {
         .collect::<Vec<_>>();
     nested_ord.push(quote! { for<'b> #ref_name<'b>: Ord });
 
-    let apply_permutation = input
+    let apply_permutation_unchecked = input
         .map_fields_nested_or(
-            |ident, _, _| quote! { self.#ident.__private_apply_permutation(dest) },
-            |ident, _| quote! { ::layout::__apply_permutation_inplace(&mut self.#ident, dest) },
+            |ident, _, _| quote! { self.#ident.__private_apply_permutation_unchecked(dest, visited) },
+            |ident, _| quote! { ::layout::__apply_permutation_inplace_unchecked(&mut self.#ident, dest, visited) },
         )
         .collect::<Vec<_>>();
 
@@ -983,7 +983,29 @@ pub fn derive_mut(input: &Input) -> TokenStream {
             /// This is `pub` due to there will be compile-error if `#[nested_soa]` is used.
             /// Do not use this method directly.
             pub fn __private_apply_permutation(&mut self, dest: &[usize]) {
-                #( #apply_permutation; )*
+                let mut visited = ::layout::__validate_permutation(dest, self.len());
+                // SAFETY: `dest` was just validated as a permutation of
+                // `0..len`.
+                unsafe {
+                    self.__private_apply_permutation_unchecked(&dest, &mut visited);
+                }
+            }
+
+            #[doc(hidden)]
+            /// Apply a destination permutation to every column without
+            /// re-validating it per column. Do not use this method directly.
+            ///
+            /// # Safety
+            ///
+            /// `dest` must be a permutation of `0..self.len()` and `visited`
+            /// must have been created with capacity for at least `self.len()`
+            /// bits.
+            pub unsafe fn __private_apply_permutation_unchecked(
+                &mut self,
+                dest: &[usize],
+                visited: &mut ::layout::VisitedBits,
+            ) {
+                #( #apply_permutation_unchecked; )*
             }
 
             /// Similar to [`&mut
@@ -993,11 +1015,25 @@ pub fn derive_mut(input: &Input) -> TokenStream {
             where
                 F: FnMut(#ref_name, #ref_name) -> core::cmp::Ordering,
             {
-                let mut permutation: Vec<usize> = (0..self.len()).collect();
-                permutation.sort_by(|j, k| f(self.index(*j), self.index(*k)));
+                let len = self.len();
+                if len <= 1 {
+                    return;
+                }
+                let mut permutation: Vec<usize> = (0..len).collect();
+                // Unstable sort with an index tiebreak: equal elements keep
+                // their original order (the observable result of a stable
+                // sort) without the stable sort's temporary buffer.
+                permutation.sort_unstable_by(|j, k| {
+                    f(self.index(*j), self.index(*k)).then_with(|| j.cmp(k))
+                });
 
-                let dest = ::layout::__invert_permutation(&permutation);
-                self.__private_apply_permutation(&dest);
+                let dest = ::layout::__argsort_to_dest(&permutation);
+                let mut visited = ::layout::VisitedBits::new(len);
+                // SAFETY: `permutation` is `0..len` reordered by the sort, so
+                // `dest` is a permutation of `0..len` by construction.
+                unsafe {
+                    self.__private_apply_permutation_unchecked(&dest, &mut visited);
+                }
             }
 
             /// Similar to [`&mut
@@ -1008,19 +1044,27 @@ pub fn derive_mut(input: &Input) -> TokenStream {
                 F: FnMut(#ref_name) -> K,
                 K: Ord,
             {
+                let len = self.len();
+                if len <= 1 {
+                    return;
+                }
                 // Evaluate the key once per element, then sort (key, index)
                 // pairs so comparisons touch only the cached keys instead of
                 // rebuilding a Ref (every column) on each of the O(n log n)
-                // comparisons. Ties break by index order, so this stays stable
-                // like `slice::sort_by_key`.
+                // comparisons. The index tiebreak keeps equal keys in their
+                // original order (stable result) while permitting an unstable
+                // sort, which needs no temporary buffer.
                 let mut keyed: Vec<(K, usize)> =
-                    (0..self.len()).map(|i| (f(self.index(i)), i)).collect();
-                keyed.sort_by(|a, b| a.0.cmp(&b.0));
-                let permutation: Vec<usize> =
-                    keyed.into_iter().map(|(_, i)| i).collect();
+                    (0..len).map(|i| (f(self.index(i)), i)).collect();
+                keyed.sort_unstable_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
 
-                let dest = ::layout::__invert_permutation(&permutation);
-                self.__private_apply_permutation(&dest);
+                let dest = ::layout::__keyed_to_dest(&keyed);
+                let mut visited = ::layout::VisitedBits::new(len);
+                // SAFETY: the pair indices are `0..len` reordered by the sort,
+                // so `dest` is a permutation of `0..len` by construction.
+                unsafe {
+                    self.__private_apply_permutation_unchecked(&dest, &mut visited);
+                }
             }
         }
 
@@ -1033,11 +1077,22 @@ pub fn derive_mut(input: &Input) -> TokenStream {
             #[doc = #slice_name_str]
             /// ::sort()`](https://doc.rust-lang.org/std/primitive.slice.html#method.sort).
             pub fn sort(&mut self) {
-                let mut permutation: Vec<usize> = (0..self.len()).collect();
-                permutation.sort_by_key(|i| self.index(*i));
+                let len = self.len();
+                if len <= 1 {
+                    return;
+                }
+                let mut permutation: Vec<usize> = (0..len).collect();
+                permutation.sort_unstable_by(|j, k| {
+                    self.index(*j).cmp(&self.index(*k)).then_with(|| j.cmp(k))
+                });
 
-                let dest = ::layout::__invert_permutation(&permutation);
-                self.__private_apply_permutation(&dest);
+                let dest = ::layout::__argsort_to_dest(&permutation);
+                let mut visited = ::layout::VisitedBits::new(len);
+                // SAFETY: `permutation` is `0..len` reordered by the sort, so
+                // `dest` is a permutation of `0..len` by construction.
+                unsafe {
+                    self.__private_apply_permutation_unchecked(&dest, &mut visited);
+                }
             }
         }
     };

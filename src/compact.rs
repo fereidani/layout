@@ -1520,30 +1520,32 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
     }
 
     pub fn __private_apply_permutation(&mut self, dest: &[usize]) {
-        let len = self.len;
-        // The cycle-walk below indexes the packed store at `self.start + d`
-        // for every `d` in `dest`, so every precondition must hold before it
-        // starts: a wrong-length or non-permutation `dest` would otherwise
-        // read and write packed lanes outside the slice bounds (corrupting
-        // neighbouring elements) or walk a cycle that never closes. Validate
-        // eagerly; the `visited` bitmap is reused for the walk afterwards.
-        assert!(
-            dest.len() == len,
-            "permutation length {} does not match slice length {len}",
-            dest.len()
-        );
-        let mut visited = crate::VisitedBits::new(len);
-        for &d in dest {
-            assert!(d < len, "index {d} out of bounds for length {len}");
-            assert!(
-                !visited.test(d),
-                "duplicate index {d}: indices must form a permutation"
-            );
-            visited.set(d);
+        let mut visited = crate::__validate_permutation(dest, self.len);
+        // SAFETY: `dest` was just validated as a permutation of `0..len`.
+        unsafe {
+            self.__private_apply_permutation_unchecked(dest, &mut visited)
         }
+    }
+
+    /// Apply a destination permutation without re-validating it, reusing the
+    /// caller's scratch bitmap. Generated composite sorts validate once and
+    /// then call this per column.
+    ///
+    /// # Safety
+    ///
+    /// `dest` must be a permutation of `0..self.len()` and `visited` must
+    /// have been created with capacity for at least `self.len()` bits.
+    #[doc(hidden)]
+    pub unsafe fn __private_apply_permutation_unchecked(
+        &mut self,
+        dest: &[usize],
+        visited: &mut crate::VisitedBits,
+    ) {
+        let len = self.len;
         visited.clear();
-        // SAFETY: every index in `dest` was validated to be `< len` above, so
-        // `self.start + i` stays within the slice's live backing storage.
+        // SAFETY: every index in `dest` is `< len` per the caller's
+        // permutation contract, so `self.start + i` stays within the slice's
+        // live backing storage.
         unsafe {
             let pa = &mut *self.packed;
             for start in 0..len {
@@ -1557,7 +1559,7 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
                 let mut temp = pa.get_unchecked(self.start + start);
                 let mut current = start;
                 loop {
-                    let next = dest[current];
+                    let next = *dest.get_unchecked(current);
                     if next == start {
                         pa.set_unchecked(self.start + start, temp);
                         break;
