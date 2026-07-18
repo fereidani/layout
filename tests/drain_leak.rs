@@ -28,7 +28,14 @@ fn build_items(n: usize) -> ItemVec {
     v
 }
 
+// The String-column tests below leak the drained elements ON PURPOSE
+// (`mem::forget` of a live drain is the scenario under test), so Miri's
+// leak checker rightly reports them; they are ignored under Miri. The
+// `copy_columns` variants further down cover the same length-consistency
+// logic with nothing to leak and do run under Miri.
+
 #[test]
+#[cfg_attr(miri, ignore = "leaks drained Strings by design")]
 fn leaked_composite_drain_keeps_columns_consistent() {
     let mut v = build_items(4);
     forget(v.drain(1..3));
@@ -49,6 +56,7 @@ fn leaked_composite_drain_keeps_columns_consistent() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "leaks the tail Strings by design")]
 fn leaked_empty_range_drain_matches_vec_semantics() {
     // `forget(vec.drain(2..2))` on a std Vec leaves len == 2 (the tail is
     // leaked); the composite drain must do the same on every column.
@@ -144,6 +152,7 @@ fn completed_drain_still_shifts_and_tightens() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "leaks drained Strings by design")]
 fn partially_consumed_leaked_drain_is_consistent() {
     let mut v = build_items(6);
     let mut d = v.drain(1..5);
@@ -154,6 +163,68 @@ fn partially_consumed_leaked_drain_is_consistent() {
     assert_eq!(v.flag.len(), 1);
     assert_eq!(v.name.len(), 1);
     assert_eq!(v.get(0).unwrap().name, "s0");
+}
+
+// Miri-runnable equivalents of the leaky tests above: a Copy payload column
+// means a forgotten drain leaks no heap allocation, while the column
+// length-consistency logic under test is identical.
+
+#[derive(SOA)]
+pub struct CopyItem {
+    pub flag: Compact<bool>,
+    pub id: u32,
+}
+
+fn build_copy_items(n: usize) -> CopyItemVec {
+    let mut v = CopyItemVec::new();
+    for i in 0..n {
+        v.push(CopyItem {
+            flag: Compact::new(i % 2 == 0),
+            id: i as u32,
+        });
+    }
+    v
+}
+
+#[test]
+fn leaked_composite_drain_consistent_copy_columns() {
+    let mut v = build_copy_items(4);
+    forget(v.drain(1..3));
+    assert_eq!(v.flag.len(), 1);
+    assert_eq!(v.id.len(), 1);
+    assert_eq!(v.len(), 1);
+    assert_eq!(*v.get(0).unwrap().id, 0);
+    assert!(v.get(1).is_none());
+    v.push(CopyItem {
+        flag: Compact::new(false),
+        id: 9,
+    });
+    assert_eq!(v.len(), 2);
+    assert!(!v.get(1).unwrap().flag.get());
+    assert_eq!(*v.get(1).unwrap().id, 9);
+}
+
+#[test]
+fn leaked_empty_range_drain_copy_columns() {
+    let mut v = build_copy_items(5);
+    forget(v.drain(2..2));
+    assert_eq!(v.len(), 2);
+    assert_eq!(v.flag.len(), 2);
+    assert_eq!(v.id.len(), 2);
+}
+
+#[test]
+fn partially_consumed_leaked_drain_copy_columns() {
+    let mut v = build_copy_items(6);
+    let mut d = v.drain(1..5);
+    // The composite drain yields owned rows, so `id` is a plain `u32`.
+    assert_eq!(d.next().unwrap().id, 1);
+    assert_eq!(d.next_back().unwrap().id, 4);
+    forget(d);
+    assert_eq!(v.len(), 1);
+    assert_eq!(v.flag.len(), 1);
+    assert_eq!(v.id.len(), 1);
+    assert_eq!(*v.get(0).unwrap().id, 0);
 }
 
 #[test]
