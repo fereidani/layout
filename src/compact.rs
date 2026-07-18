@@ -1633,6 +1633,21 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
         }
     }
 
+    /// Sort the slice with a comparator.
+    ///
+    /// A compact column holds at most `2^BITS <= 16` distinct values, so this
+    /// is a counting sort: the raw lane values are counted in one word-level
+    /// pass, the distinct values are ordered with `f`, and the slice is
+    /// rewritten with word-level fills. Consequences (all documented
+    /// contract):
+    ///
+    /// * `f` is invoked on distinct values only (at most 120 calls), never once
+    ///   per element, so it must be a pure comparison.
+    /// * Elements whose values compare `Equal` are grouped by their stored
+    ///   value (the observable result of `slice::sort_unstable_by`), not
+    ///   interleaved in their original order.
+    ///
+    /// Runs in `O(n / lanes_per_word)` word operations with no allocation.
     pub fn sort_by<F>(&mut self, mut f: F)
     where
         F: FnMut(Compact<T>, Compact<T>) -> core::cmp::Ordering,
@@ -1641,76 +1656,74 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
         if len <= 1 {
             return;
         }
-        let mut argsort: Vec<usize> = (0..len).collect();
-        // SAFETY: `self.packed` is a valid `Store<T>` for the slice's lifetime;
-        // `*j` and `*k` are in `0..len` by construction.
+        let nvals = 1usize << T::BITS;
+        debug_assert!(nvals <= 16);
+        // Count every raw lane value. The last bucket comes from the length,
+        // so a 1-bit column costs a single `count_ones` pass.
+        let mut counts = [0usize; 16];
         {
+            // SAFETY: the slice's lanes are within the live store.
             let pa = unsafe { &*self.packed };
-            argsort.sort_by(|j, k| {
-                let a = Compact(T::decode(unsafe {
-                    pa.get_unchecked(self.start + *j)
-                }));
-                let b = Compact(T::decode(unsafe {
-                    pa.get_unchecked(self.start + *k)
-                }));
-                f(a, b)
-            });
+            let mut seen = 0;
+            for (v, slot) in counts.iter_mut().enumerate().take(nvals - 1) {
+                let c = pa.count_in(self.start, len, v);
+                *slot = c;
+                seen += c;
+            }
+            counts[nvals - 1] = len - seen;
         }
-        self.__sort_apply(&argsort);
+        // Order the value table with `f` (stable insertion sort of at most 16
+        // entries, so equal-comparing values keep ascending raw order).
+        let mut order = [0usize; 16];
+        for (v, slot) in order.iter_mut().enumerate().take(nvals) {
+            *slot = v;
+        }
+        for i in 1..nvals {
+            let mut j = i;
+            while j > 0
+                && f(
+                    Compact(T::decode(order[j - 1])),
+                    Compact(T::decode(order[j])),
+                ) == core::cmp::Ordering::Greater
+            {
+                order.swap(j - 1, j);
+                j -= 1;
+            }
+        }
+        // Rewrite the slice as runs of equal values, word-level.
+        // SAFETY: the slice's lanes are within the live store; the runs sum
+        // to exactly `len`.
+        let pa = unsafe { &mut *self.packed };
+        let mut at = self.start;
+        for &v in order.iter().take(nvals) {
+            let c = counts[v];
+            if c > 0 {
+                pa.fill_range(at, c, v);
+                at += c;
+            }
+        }
     }
 
+    /// Sort the slice by a key function.
+    ///
+    /// Counting sort, like [`sort_by`](Self::sort_by): the key function is
+    /// invoked on distinct values only (at most 240 calls), and elements
+    /// whose keys compare equal are grouped by their stored value.
     pub fn sort_by_key<F, K>(&mut self, mut f: F)
     where
         F: FnMut(Compact<T>) -> K,
         K: Ord,
     {
-        let len = self.len;
-        if len <= 1 {
-            return;
-        }
-        let mut argsort: Vec<usize> = (0..len).collect();
-        // SAFETY: `self.packed` is a valid `Store<T>` for the slice's
-        // lifetime; `*i` is in `0..len` by construction.
-        {
-            let pa = unsafe { &*self.packed };
-            argsort.sort_by_key(|i| {
-                let v = Compact(T::decode(unsafe {
-                    pa.get_unchecked(self.start + *i)
-                }));
-                f(v)
-            });
-        }
-        self.__sort_apply(&argsort);
+        self.sort_by(|a, b| f(a).cmp(&f(b)));
     }
 
+    /// Sort the slice by `T`'s ordering (counting sort, see
+    /// [`sort_by`](Self::sort_by)).
     pub fn sort(&mut self)
     where
         T: Ord,
     {
         self.sort_by(|a, b| a.0.cmp(&b.0));
-    }
-
-    /// Gather rows into a fresh store in `argsort` order and write them back.
-    /// Compact values are `Copy`, so this needs none of the permutation
-    /// inversion and cycle-walking that `apply_index` uses for plain columns.
-    fn __sort_apply(&mut self, argsort: &[usize]) {
-        let len = self.len;
-        // SAFETY: `self.packed` is valid for the slice's lifetime; every
-        // `argsort[i] < len`. `pa` is dropped before the mutable `pam` is
-        // taken.
-        let pa = unsafe { &*self.packed };
-        let mut sorted = Store::<T>::with_capacity(len);
-        for &src in argsort {
-            // SAFETY: `src < len` (argsort is a permutation of `0..len`).
-            sorted.push(unsafe { pa.get_unchecked(self.start + src) });
-        }
-        let pam = unsafe { &mut *self.packed };
-        for i in 0..len {
-            // SAFETY: `i < len` and `sorted` holds exactly `len` lanes.
-            unsafe {
-                pam.set_unchecked(self.start + i, sorted.get_unchecked(i));
-            }
-        }
     }
 }
 

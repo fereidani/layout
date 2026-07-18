@@ -166,6 +166,26 @@ fn sort_by_key_mass(b: &mut Bencher) {
     });
 }
 
+// --- compact sort (counting sort) vs sorting a plain bool vec ---
+
+fn compact_sort(b: &mut Bencher) {
+    let base = build_compact_bools(N, |i| i % 3 == 0);
+    b.iter(|| {
+        let mut v = base.clone();
+        v.as_mut_slice().sort();
+        black_box(v)
+    });
+}
+
+fn plain_bool_sort(b: &mut Bencher) {
+    let base: Vec<bool> = (0..N).map(|i| i % 3 == 0).collect();
+    b.iter(|| {
+        let mut v = base.clone();
+        v.sort_unstable();
+        black_box(v)
+    });
+}
+
 benchmark_group!(
     perf,
     from_iter_exact,
@@ -181,6 +201,8 @@ benchmark_group!(
     compact_count_specialized,
     compact_eq,
     apply_index_reverse,
-    sort_by_key_mass
+    sort_by_key_mass,
+    compact_sort,
+    plain_bool_sort
 );
 benchmark_main!(perf);

@@ -411,6 +411,71 @@ impl<const BITS: u32> PackedArray<BITS> {
         }
     }
 
+    /// Bit mask covering word bits `[lo, hi)`, `0 <= lo < hi <= usize::BITS`.
+    #[inline(always)]
+    fn bit_span_mask(lo: usize, hi: usize) -> usize {
+        let width = hi - lo;
+        if width == usize::BITS as usize {
+            usize::MAX
+        } else {
+            ((1usize << width) - 1) << lo
+        }
+    }
+
+    /// Overwrite lanes `[start, start + len)` with `value` (truncated to
+    /// `BITS` bits).
+    ///
+    /// Interior words are stored wholesale with the lane-replicated value;
+    /// the two boundary words (at most) are masked read-modify-writes, so
+    /// this runs at memset speed for long ranges.
+    pub fn fill_range(&mut self, start: usize, len: usize, value: usize) {
+        assert!(
+            start <= self.len && len <= self.len - start,
+            "fill range out of bounds: the len is {} but the range is \
+             {start}..{start}+{len}",
+            self.len
+        );
+        if len == 0 {
+            return;
+        }
+        let mask = Self::mask();
+        // Lane-replicated fill word (mask divides usize::MAX exactly for
+        // BITS in {1,2,4}).
+        let rep = (value & mask).wrapping_mul(usize::MAX / mask);
+        let end = start + len;
+        let mut wi = Self::word_of(start);
+        let last = Self::word_of(end - 1);
+        let head_lo = Self::offset_of(start);
+        let tail_hi = Self::offset_of(end - 1) + BITS as usize;
+        let word_bits = usize::BITS as usize;
+        if wi == last {
+            // The whole range sits in one word.
+            let m = Self::bit_span_mask(head_lo, tail_hi);
+            let w = &mut self.words[wi];
+            *w = (*w & !m) | (rep & m);
+            return;
+        }
+        if head_lo != 0 {
+            // Partial head word.
+            let m = Self::bit_span_mask(head_lo, word_bits);
+            let w = &mut self.words[wi];
+            *w = (*w & !m) | (rep & m);
+            wi += 1;
+        }
+        // Fully covered interior words (including the last word when the
+        // range ends exactly on its boundary).
+        let interior_end = if tail_hi == word_bits { last + 1 } else { last };
+        for w in &mut self.words[wi..interior_end] {
+            *w = rep;
+        }
+        if tail_hi != word_bits {
+            // Partial tail word.
+            let m = Self::bit_span_mask(0, tail_hi);
+            let w = &mut self.words[last];
+            *w = (*w & !m) | (rep & m);
+        }
+    }
+
     /// Whether `self`'s lanes `[start, start + len)` equal `other`'s lanes
     /// `[other_start, other_start + len)`.
     ///
@@ -628,6 +693,8 @@ pub trait BitPack: Clone + Default + core::fmt::Debug + Sized {
     fn extend_from_packed(&mut self, other: &Self, start: usize, len: usize);
     /// Append `count` lanes all equal to `value`.
     fn extend_fill(&mut self, value: usize, count: usize);
+    /// Overwrite lanes `[start, start + len)` with `value`.
+    fn fill_range(&mut self, start: usize, len: usize, value: usize);
     /// Whether `self`'s lanes `[start, start + len)` equal `other`'s lanes at
     /// `other_start`.
     fn range_eq(
@@ -729,6 +796,10 @@ impl<const BITS: u32> BitPack for PackedArray<BITS> {
     #[inline]
     fn extend_fill(&mut self, value: usize, count: usize) {
         PackedArray::extend_fill(self, value, count);
+    }
+    #[inline]
+    fn fill_range(&mut self, start: usize, len: usize, value: usize) {
+        PackedArray::fill_range(self, start, len, value);
     }
     #[inline]
     fn range_eq(
