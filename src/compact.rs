@@ -387,8 +387,9 @@ impl<T: CompactRepr + core::hash::Hash> core::hash::Hash for CompactVec<T> {
 impl<T: CompactRepr> core::iter::FromIterator<Compact<T>> for CompactVec<T> {
     fn from_iter<I: IntoIterator<Item = Compact<T>>>(iter: I) -> Self {
         let iterator = iter.into_iter();
-        let capacity = iterator.size_hint().1.unwrap_or(0);
-        let mut result = CompactVec::<T>::with_capacity(capacity);
+        // Lower bound like `std`'s `collect`: a filter's upper bound is the
+        // source length, so reserving it over-allocates the packed store.
+        let mut result = CompactVec::<T>::with_capacity(iterator.size_hint().0);
         for item in iterator {
             result.push(item);
         }
@@ -398,7 +399,9 @@ impl<T: CompactRepr> core::iter::FromIterator<Compact<T>> for CompactVec<T> {
 
 impl<T: CompactRepr> core::iter::Extend<Compact<T>> for CompactVec<T> {
     fn extend<I: IntoIterator<Item = Compact<T>>>(&mut self, iter: I) {
-        for item in iter {
+        let iterator = iter.into_iter();
+        self.reserve(iterator.size_hint().0);
+        for item in iterator {
             self.push(item);
         }
     }

@@ -41,3 +41,21 @@ fn from_iter_capacity_tracks_result_not_source() {
         assert_eq!(*p.mass, 0.0);
     }
 }
+
+// The same lower-bound sizing for a compact column's `collect`.
+#[test]
+fn compact_from_iter_capacity_tracks_result() {
+    use layout::{Compact, CompactVec};
+    let full: CompactVec<bool> = (0..100_000)
+        .map(|i| Compact::new(i % 10_000 == 0))
+        .collect();
+    let kept: CompactVec<bool> = full.iter().filter(|c| c.get()).collect();
+    assert!(kept.len() <= 20);
+    assert!(
+        kept.capacity() < 10_000,
+        "over-allocated: len={} capacity={}",
+        kept.len(),
+        kept.capacity()
+    );
+    assert!(kept.iter().all(|c| c.get()));
+}

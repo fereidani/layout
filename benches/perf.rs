@@ -68,5 +68,19 @@ fn from_iter_filtered(b: &mut Bencher) {
     });
 }
 
-benchmark_group!(perf, from_iter_exact, from_iter_filtered);
+fn compact_from_iter_filtered(b: &mut Bencher) {
+    let src = build_compact_bools(N, |i| i % 977 == 0);
+    b.iter(|| {
+        let v: CompactVec<bool> =
+            black_box(&src).iter().filter(|c| c.get()).collect();
+        black_box(v)
+    });
+}
+
+benchmark_group!(
+    perf,
+    from_iter_exact,
+    from_iter_filtered,
+    compact_from_iter_filtered
+);
 benchmark_main!(perf);
