@@ -294,9 +294,9 @@ pub use compact::CompactRepr;
 #[doc(hidden)]
 pub use compact::{
     Compact, CompactBool, CompactChunks, CompactChunksExact,
-    CompactChunksExactMut, CompactChunksMut, CompactDrain, CompactIter,
-    CompactIterMut, CompactPtr, CompactPtrMut, CompactRefMut, CompactSlice,
-    CompactSliceMut, CompactVec,
+    CompactChunksExactMut, CompactChunksMut, CompactDrain, CompactIntoIter,
+    CompactIter, CompactIterMut, CompactPtr, CompactPtrMut, CompactRefMut,
+    CompactSlice, CompactSliceMut, CompactVec,
 };
 /// Derive macro implementing [`CompactRepr`] for a fieldless enum.
 ///

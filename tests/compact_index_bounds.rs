@@ -96,7 +96,7 @@ fn drain_oob_range_panics() {
 fn compactvec_splice_oob_range_is_rejected() {
     let mut v = CompactVec::<bool>::new();
     v.push(Compact(true)); // len == 1
-    let _: Vec<Compact<bool>> =
+    let _: CompactVec<bool> =
         v.splice(0..5, core::iter::empty::<Compact<bool>>());
 }
 

@@ -22,7 +22,6 @@
 //! No dereference or write-back-on-drop is involved: a mutable handle writes
 //! the packed word immediately.
 
-use alloc::vec::Vec;
 use core::{marker::PhantomData, ops::Range};
 
 use crate::bitpack::BitPack;
@@ -746,10 +745,15 @@ impl<T: CompactRepr> CompactVec<T> {
         }
     }
 
-    #[allow(clippy::forget_non_drop)]
-    pub fn splice<R, I>(&mut self, range: R, replace_with: I) -> Vec<Compact<T>>
+    /// Replace the elements in `range` with `replace_with`, returning the
+    /// removed elements as a (bit-packed) [`CompactVec`].
+    ///
+    /// Unlike [`Vec::splice`] this is eager, but both the removed elements
+    /// and the buffered replacement stay bit-packed, and the tail is shifted
+    /// with one word-level move.
+    pub fn splice<R, I>(&mut self, range: R, replace_with: I) -> CompactVec<T>
     where
-        R: core::ops::RangeBounds<usize> + Clone,
+        R: core::ops::RangeBounds<usize>,
         I: core::iter::IntoIterator<Item = Compact<T>>,
     {
         let start = match range.start_bound() {
@@ -769,24 +773,24 @@ impl<T: CompactRepr> CompactVec<T> {
             start,
             end
         );
-        let mut removed = Vec::new();
-        for i in start..end {
-            removed.push(Compact(T::decode(self.inner.get(i))));
-        }
         let remove_count = end - start;
-        let replacement: Vec<Compact<T>> = replace_with.into_iter().collect();
+        // Word-copy the removed range out while it is still contiguous.
+        let mut removed = Store::<T>::with_capacity(remove_count);
+        removed.extend_from_packed(&self.inner, start, remove_count);
+        // Buffer the replacement bit-packed (an iterator of unknown length
+        // cannot be written in place while the tail still occupies the
+        // range).
+        let iterator = replace_with.into_iter();
+        let mut replacement = Store::<T>::with_capacity(iterator.size_hint().0);
+        for item in iterator {
+            replacement.push(T::encode(item.0));
+        }
         let insert_count = replacement.len();
         if insert_count < remove_count {
-            for (i, val) in replacement.iter().enumerate() {
-                self.inner.set(start + i, T::encode(val.0));
-            }
-            let shift_from = end;
-            let shift_to = start + insert_count;
-            let tail_len = self.inner.len() - shift_from;
-            self.inner.copy_lanes(shift_from, shift_to, tail_len);
-            for _ in 0..remove_count - insert_count {
-                self.inner.pop();
-            }
+            let tail_len = self.inner.len() - end;
+            self.inner.copy_lanes(end, start + insert_count, tail_len);
+            self.inner
+                .truncate(self.inner.len() - (remove_count - insert_count));
         } else {
             for _ in 0..insert_count - remove_count {
                 self.inner.push(0);
@@ -795,14 +799,16 @@ impl<T: CompactRepr> CompactVec<T> {
             let shift_to = start + insert_count;
             let tail_len = self.inner.len() - shift_to;
             self.inner.copy_lanes(shift_from, shift_to, tail_len);
-            for (i, val) in replacement.iter().enumerate() {
-                self.inner.set(start + i, T::encode(val.0));
+        }
+        for i in 0..insert_count {
+            // SAFETY: `start + i < start + insert_count <= self.len()` after
+            // the resize above.
+            unsafe {
+                self.inner
+                    .set_unchecked(start + i, replacement.get_unchecked(i));
             }
         }
-        // No `mem::forget` needed: `Compact<T>: Copy` (no `Drop`), and `encode`
-        // copies `val.0`, so `replacement` owns intact values and drops
-        // normally.
-        removed
+        CompactVec { inner: removed }
     }
 }
 
@@ -821,6 +827,67 @@ impl<'a, T: CompactRepr> IntoIterator for &'a mut CompactVec<T> {
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
         self.iter_mut()
+    }
+}
+
+/// Owning by-value iterator for [`CompactVec`] (analogous to
+/// `std::vec::IntoIter`).
+pub struct CompactIntoIter<T: CompactRepr> {
+    inner: Store<T>,
+    pos: usize,
+    end: usize,
+}
+
+impl<T: CompactRepr> Iterator for CompactIntoIter<T> {
+    type Item = Compact<T>;
+    #[inline]
+    fn next(&mut self) -> Option<Compact<T>> {
+        if self.pos < self.end {
+            // SAFETY: `pos < end <= len` of the owned storage.
+            let v = Compact(T::decode(unsafe {
+                self.inner.get_unchecked(self.pos)
+            }));
+            self.pos += 1;
+            Some(v)
+        } else {
+            None
+        }
+    }
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let r = self.end - self.pos;
+        (r, Some(r))
+    }
+}
+
+impl<T: CompactRepr> DoubleEndedIterator for CompactIntoIter<T> {
+    #[inline]
+    fn next_back(&mut self) -> Option<Compact<T>> {
+        if self.pos < self.end {
+            self.end -= 1;
+            // SAFETY: as in `next`.
+            Some(Compact(T::decode(unsafe {
+                self.inner.get_unchecked(self.end)
+            })))
+        } else {
+            None
+        }
+    }
+}
+
+impl<T: CompactRepr> ExactSizeIterator for CompactIntoIter<T> {}
+
+impl<T: CompactRepr> IntoIterator for CompactVec<T> {
+    type Item = Compact<T>;
+    type IntoIter = CompactIntoIter<T>;
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        let end = self.inner.len();
+        CompactIntoIter {
+            inner: self.inner,
+            pos: 0,
+            end,
+        }
     }
 }
 
