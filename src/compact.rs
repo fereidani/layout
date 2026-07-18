@@ -128,6 +128,38 @@ impl<T: CompactRepr> From<T> for Compact<T> {
     }
 }
 
+// `Compact<T>` is a transparent storage marker around a `Copy` value, so it
+// dereferences to the value: `*c`, `c.method()` and `c == value` all work
+// without unwrapping.
+impl<T: CompactRepr> core::ops::Deref for Compact<T> {
+    type Target = T;
+    #[inline(always)]
+    fn deref(&self) -> &T {
+        &self.0
+    }
+}
+
+impl<T: CompactRepr> core::ops::DerefMut for Compact<T> {
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut T {
+        &mut self.0
+    }
+}
+
+impl<T: CompactRepr + PartialEq> PartialEq<T> for Compact<T> {
+    #[inline(always)]
+    fn eq(&self, other: &T) -> bool {
+        self.0 == *other
+    }
+}
+
+impl<T: CompactRepr + PartialOrd> PartialOrd<T> for Compact<T> {
+    #[inline(always)]
+    fn partial_cmp(&self, other: &T) -> Option<core::cmp::Ordering> {
+        self.0.partial_cmp(other)
+    }
+}
+
 #[cfg(feature = "serde")]
 impl<T: CompactRepr + serde::Serialize> serde::Serialize for Compact<T> {
     fn serialize<S: serde::Serializer>(
@@ -440,8 +472,8 @@ impl<T: CompactRepr> CompactVec<T> {
     }
 
     #[inline]
-    pub fn push(&mut self, value: Compact<T>) {
-        self.inner.push(T::encode(value.0));
+    pub fn push(&mut self, value: impl Into<Compact<T>>) {
+        self.inner.push(T::encode(value.into().0));
     }
 
     #[inline]
@@ -449,7 +481,8 @@ impl<T: CompactRepr> CompactVec<T> {
         self.inner.pop().map(|w| Compact(T::decode(w)))
     }
 
-    pub fn insert(&mut self, index: usize, element: Compact<T>) {
+    pub fn insert(&mut self, index: usize, element: impl Into<Compact<T>>) {
+        let element = element.into();
         assert!(
             index <= self.len(),
             "insertion index (is {}) should be <= len (is {})",
@@ -503,7 +536,12 @@ impl<T: CompactRepr> CompactVec<T> {
         val
     }
 
-    pub fn replace(&mut self, index: usize, element: Compact<T>) -> Compact<T> {
+    pub fn replace(
+        &mut self,
+        index: usize,
+        element: impl Into<Compact<T>>,
+    ) -> Compact<T> {
+        let element = element.into();
         assert!(
             index < self.len(),
             "index out of bounds: the len is {} but the index is {}",
@@ -524,7 +562,8 @@ impl<T: CompactRepr> CompactVec<T> {
     ///
     /// Panics if `index >= self.len()`.
     #[inline]
-    pub fn set(&mut self, index: usize, value: Compact<T>) {
+    pub fn set(&mut self, index: usize, value: impl Into<Compact<T>>) {
+        let value = value.into();
         assert!(
             index < self.len(),
             "index out of bounds: the len is {} but the index is {}",
@@ -542,7 +581,8 @@ impl<T: CompactRepr> CompactVec<T> {
 
     /// Resizes the column to `new_len`, pushing copies of `value` to grow or
     /// truncating to shrink (analogous to [`Vec::resize`]).
-    pub fn resize(&mut self, new_len: usize, value: Compact<T>) {
+    pub fn resize(&mut self, new_len: usize, value: impl Into<Compact<T>>) {
+        let value = value.into();
         let cur = self.inner.len();
         if new_len <= cur {
             self.inner.truncate(new_len);
