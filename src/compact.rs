@@ -22,7 +22,7 @@
 //! No dereference or write-back-on-drop is involved: a mutable handle writes
 //! the packed word immediately.
 
-use alloc::{vec, vec::Vec};
+use alloc::vec::Vec;
 use core::{marker::PhantomData, ops::Range};
 
 use crate::bitpack::BitPack;
@@ -1478,26 +1478,26 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
             "permutation length {} does not match slice length {len}",
             dest.len()
         );
-        let mut visited = vec![false; len];
+        let mut visited = crate::VisitedBits::new(len);
         for &d in dest {
             assert!(d < len, "index {d} out of bounds for length {len}");
             assert!(
-                !visited[d],
+                !visited.test(d),
                 "duplicate index {d}: indices must form a permutation"
             );
-            visited[d] = true;
+            visited.set(d);
         }
-        visited.fill(false);
+        visited.clear();
         unsafe {
             let pa = &mut *self.packed;
             for start in 0..len {
-                if visited[start] {
+                if visited.test(start) {
                     continue;
                 }
                 // `dest` maps each current index to its destination index.
                 // Rotate each cycle into place using a single saved value so no
                 // element is lost.
-                visited[start] = true;
+                visited.set(start);
                 let mut temp = pa.get(self.start + start);
                 let mut current = start;
                 loop {
@@ -1509,7 +1509,7 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
                     let saved = pa.get(self.start + next);
                     pa.set(self.start + next, temp);
                     temp = saved;
-                    visited[next] = true;
+                    visited.set(next);
                     current = next;
                 }
             }
