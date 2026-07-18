@@ -123,6 +123,18 @@ fn plain_bytes_clone(b: &mut Bencher) {
     b.iter(|| black_box(src.clone()));
 }
 
+// --- CompactIter value iteration vs the specialized count ---
+
+fn compact_iter_count(b: &mut Bencher) {
+    let src = build_compact_bools(N, |i| i % 3 == 0);
+    b.iter(|| black_box(src.iter().filter(|c| c.get()).count()));
+}
+
+fn compact_count_specialized(b: &mut Bencher) {
+    let src = build_compact_bools(N, |i| i % 3 == 0);
+    b.iter(|| black_box(src.count(true)));
+}
+
 benchmark_group!(
     perf,
     from_iter_exact,
@@ -133,6 +145,8 @@ benchmark_group!(
     compact_to_vec,
     compact_extend_from_slice,
     compact_split_off,
-    plain_bytes_clone
+    plain_bytes_clone,
+    compact_iter_count,
+    compact_count_specialized
 );
 benchmark_main!(perf);

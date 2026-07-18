@@ -439,6 +439,8 @@ pub trait BitPack: Clone + Default + core::fmt::Debug + Sized {
     fn truncate(&mut self, new_len: usize);
     /// Read the element at `index` as a `usize`.
     fn get(&self, index: usize) -> usize;
+    /// Raw packed word at word-index `index` (for word-at-a-time reads).
+    fn word(&self, index: usize) -> usize;
     /// Write `value` to the element at `index`.
     fn set(&mut self, index: usize, value: usize);
     /// Append `value` to the end.
@@ -498,6 +500,11 @@ impl<const BITS: u32> BitPack for PackedArray<BITS> {
     #[inline]
     fn get(&self, index: usize) -> usize {
         PackedArray::get(self, index)
+    }
+    #[inline]
+    fn word(&self, index: usize) -> usize {
+        debug_assert!(index < self.words.len());
+        self.words[index]
     }
     #[inline]
     fn set(&mut self, index: usize, value: usize) {
