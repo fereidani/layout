@@ -243,6 +243,68 @@ impl<const BITS: u32> PackedArray<BITS> {
         other.clear();
     }
 
+    /// Append `other`'s lanes `[start, start + len)` to the end.
+    ///
+    /// When the destination tail and `start` are both word-aligned the packed
+    /// words are copied wholesale (a `Vec<usize>` memcpy); otherwise lanes are
+    /// copied one at a time. `other` must not alias `self`.
+    pub fn extend_from_packed(
+        &mut self,
+        other: &Self,
+        start: usize,
+        len: usize,
+    ) {
+        debug_assert!(start + len <= other.len);
+        if len == 0 {
+            return;
+        }
+        let per = Self::items_per_word();
+        self.reserve(len);
+        if self.len % per == 0 && start % per == 0 {
+            // Aligned: copy whole words. Stale bits past `start + len` in the
+            // last word land beyond `self`'s new length, so stay invisible.
+            let first = start / per;
+            let nwords = Self::words_for(len);
+            self.words
+                .extend_from_slice(&other.words[first..first + nwords]);
+            self.len += len;
+        } else {
+            for i in 0..len {
+                self.push(other.get(start + i));
+            }
+        }
+    }
+
+    /// Append `count` lanes all equal to `value` (truncated to `BITS` bits).
+    pub fn extend_fill(&mut self, value: usize, count: usize) {
+        if count == 0 {
+            return;
+        }
+        let per = Self::items_per_word();
+        let mask = Self::mask();
+        let v = value & mask;
+        self.reserve(count);
+        let mut filled = 0;
+        // Finish the current partial word one lane at a time.
+        while filled < count && self.len % per != 0 {
+            self.push(v);
+            filled += 1;
+        }
+        // Bulk full words: `v` replicated into every lane (mask divides
+        // usize::MAX exactly for BITS in {1,2,4}).
+        let full_words = (count - filled) / per;
+        if full_words > 0 {
+            let rep = v.wrapping_mul(usize::MAX / mask);
+            self.words.resize(self.words.len() + full_words, rep);
+            self.len += full_words * per;
+            filled += full_words * per;
+        }
+        while filled < count {
+            self.push(v);
+            filled += 1;
+        }
+    }
+
     /// Count elements whose stored value equals `value`, over
     /// `[start, start+len)`.
     ///
@@ -388,6 +450,10 @@ pub trait BitPack: Clone + Default + core::fmt::Debug + Sized {
     /// Move all elements from `other` to the end of `self`, leaving `other`
     /// empty.
     fn append(&mut self, other: &mut Self);
+    /// Append `other`'s lanes `[start, start + len)` to the end.
+    fn extend_from_packed(&mut self, other: &Self, start: usize, len: usize);
+    /// Append `count` lanes all equal to `value`.
+    fn extend_fill(&mut self, value: usize, count: usize);
     /// Count elements equal to `value` in `[start, start+len)`.
     fn count_in(&self, start: usize, len: usize, value: usize) -> usize;
 }
@@ -452,6 +518,14 @@ impl<const BITS: u32> BitPack for PackedArray<BITS> {
     #[inline]
     fn append(&mut self, other: &mut Self) {
         PackedArray::append(self, other);
+    }
+    #[inline]
+    fn extend_from_packed(&mut self, other: &Self, start: usize, len: usize) {
+        PackedArray::extend_from_packed(self, other, start, len);
+    }
+    #[inline]
+    fn extend_fill(&mut self, value: usize, count: usize) {
+        PackedArray::extend_fill(self, value, count);
     }
     #[inline]
     fn count_in(&self, start: usize, len: usize, value: usize) -> usize {
@@ -557,6 +631,78 @@ mod tests {
         assert!(a.capacity() >= 200);
         a.shrink_to_fit();
         assert!(a.capacity() >= a.len());
+    }
+
+    // `extend_from_packed` / `extend_fill` against a per-element oracle across
+    // widths and every alignment of destination tail, source start, and length.
+    fn check_bulk<const B: u32>() {
+        let per = (usize::BITS / B) as usize;
+        let mask = (1usize << B) - 1;
+        let dest_lens = [0, 1, per - 1, per, per + 1, 2 * per];
+
+        let starts = [0, 1, per, per + 2];
+        let lens = [0, 1, per - 1, per, per + 3, 2 * per + 1];
+        for &dl in &dest_lens {
+            for &st in &starts {
+                for &ln in &lens {
+                    let mut src = PackedArray::<B>::new();
+                    for i in 0..(st + ln + 2) {
+                        src.push(i.wrapping_mul(7).wrapping_add(1) & mask);
+                    }
+                    let mut dest = PackedArray::<B>::new();
+                    for i in 0..dl {
+                        dest.push(i.wrapping_mul(3).wrapping_add(2) & mask);
+                    }
+                    let mut want: Vec<usize> =
+                        (0..dl).map(|i| dest.get(i)).collect();
+                    for i in 0..ln {
+                        want.push(src.get(st + i));
+                    }
+                    dest.extend_from_packed(&src, st, ln);
+                    assert_eq!(dest.len(), dl + ln);
+                    for i in 0..dest.len() {
+                        assert_eq!(
+                            dest.get(i),
+                            want[i],
+                            "packed B={B} dl={dl} st={st} ln={ln} at {i}"
+                        );
+                    }
+                }
+            }
+        }
+
+        let counts = [0, 1, per - 1, per, per + 5, 2 * per];
+        for &dl in &dest_lens {
+            for &cnt in &counts {
+                for &v in &[0usize, 1, mask, mask / 2] {
+                    let mut dest = PackedArray::<B>::new();
+                    for i in 0..dl {
+                        dest.push(i.wrapping_mul(5).wrapping_add(1) & mask);
+                    }
+                    let mut want: Vec<usize> =
+                        (0..dl).map(|i| dest.get(i)).collect();
+                    for _ in 0..cnt {
+                        want.push(v);
+                    }
+                    dest.extend_fill(v, cnt);
+                    assert_eq!(dest.len(), dl + cnt);
+                    for i in 0..dest.len() {
+                        assert_eq!(
+                            dest.get(i),
+                            want[i],
+                            "fill B={B} dl={dl} cnt={cnt} v={v} at {i}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bulk_primitives_match_oracle() {
+        check_bulk::<1>();
+        check_bulk::<2>();
+        check_bulk::<4>();
     }
 
     // -----------------------------------------------------------------

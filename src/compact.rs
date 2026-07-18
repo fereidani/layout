@@ -550,11 +550,7 @@ impl<T: CompactRepr> CompactVec<T> {
         if new_len <= cur {
             self.inner.truncate(new_len);
         } else {
-            let encoded = T::encode(value.0);
-            self.inner.reserve(new_len - cur);
-            for _ in cur..new_len {
-                self.inner.push(encoded);
-            }
+            self.inner.extend_fill(T::encode(value.0), new_len - cur);
         }
     }
 
@@ -571,9 +567,7 @@ impl<T: CompactRepr> CompactVec<T> {
             at
         );
         let mut other = Store::<T>::with_capacity(self.len() - at);
-        for i in at..self.inner.len() {
-            other.push(self.inner.get(i));
-        }
+        other.extend_from_packed(&self.inner, at, self.inner.len() - at);
         self.inner.truncate(at);
         CompactVec { inner: other }
     }
@@ -586,18 +580,14 @@ impl<T: CompactRepr> CompactVec<T> {
     /// [`Vec::extend_from_slice`]). The generated `#[layout(Clone)]`
     /// `extend_from_slice` dispatches here for compact columns.
     pub fn extend_from_slice(&mut self, other: CompactSlice<'_, T>) {
-        let n = other.len();
-        self.inner.reserve(n);
-        // The stored lanes are already encoded; copy them directly instead of
-        // decoding and re-encoding each element.
-        // SAFETY: `other.packed` is a valid `Store<T>` for `other`'s lifetime,
-        // `other.start + i` is in bounds, and `src` aliases the source store,
-        // not `self`.
-        let src: &Store<T> = unsafe { &*other.packed };
-        let start = other.start;
-        for i in 0..n {
-            self.inner.push(src.get(start + i));
+        if other.is_empty() {
+            return;
         }
+        // SAFETY: `other.len() > 0` implies `other.packed` points at live
+        // storage; it cannot alias `self` (a shared borrow cannot coexist with
+        // this `&mut self`). Word-aligned ranges copy wholesale.
+        let src: &Store<T> = unsafe { &*other.packed };
+        self.inner.extend_from_packed(src, other.start, other.len());
     }
 
     pub fn as_slice(&self) -> CompactSlice<'_, T> {
@@ -1097,9 +1087,14 @@ impl<'a, T: CompactRepr> CompactSlice<'a, T> {
 
     pub fn to_vec(&self) -> CompactVec<T> {
         let mut v = CompactVec::<T>::with_capacity(self.len);
-        for i in 0..self.len {
-            // SAFETY: `i < len`, and `len > 0` implies valid backing storage.
-            v.inner.push(unsafe { (*self.packed).get(self.start + i) });
+        if self.len > 0 {
+            // SAFETY: `len > 0` implies valid backing storage that does not
+            // alias the fresh `v`.
+            v.inner.extend_from_packed(
+                unsafe { &*self.packed },
+                self.start,
+                self.len,
+            );
         }
         v
     }
