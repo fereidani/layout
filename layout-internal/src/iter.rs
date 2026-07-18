@@ -276,8 +276,9 @@ pub fn derive(input: &Input) -> TokenStream {
         impl core::iter::FromIterator<#name> for #vec_name {
             fn from_iter<T: IntoIterator<Item=#name>>(iter: T) -> Self {
                 let iterator = iter.into_iter();
-                let size_hint = iterator.size_hint();
-                let capacity = size_hint.1.unwrap_or(size_hint.0);
+                // Lower bound like `std`'s `collect`: a filter's upper bound is
+                // the source length, so reserving it over-allocates every column.
+                let capacity = iterator.size_hint().0;
                 let mut result = #vec_name::with_capacity(capacity);
                 iterator.for_each(|element| result.push(element));
                 result
