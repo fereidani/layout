@@ -135,6 +135,14 @@ fn compact_count_specialized(b: &mut Bencher) {
     b.iter(|| black_box(src.count(true)));
 }
 
+// --- word-batched equality of two equal columns ---
+
+fn compact_eq(b: &mut Bencher) {
+    let x = build_compact_bools(N, |i| i % 2 == 0);
+    let y = x.clone();
+    b.iter(|| black_box(x == y));
+}
+
 benchmark_group!(
     perf,
     from_iter_exact,
@@ -147,6 +155,7 @@ benchmark_group!(
     compact_split_off,
     plain_bytes_clone,
     compact_iter_count,
-    compact_count_specialized
+    compact_count_specialized,
+    compact_eq
 );
 benchmark_main!(perf);

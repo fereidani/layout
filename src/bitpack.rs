@@ -305,6 +305,41 @@ impl<const BITS: u32> PackedArray<BITS> {
         }
     }
 
+    /// Whether `self`'s lanes `[start, start + len)` equal `other`'s lanes
+    /// `[other_start, other_start + len)`.
+    ///
+    /// Word-batched (one `usize` compare per `per` lanes) when both starts are
+    /// word-aligned; otherwise compared lane by lane. Full words hold only
+    /// valid lanes, so they compare verbatim; the tail word is masked to its
+    /// valid lanes so stale bits past the range do not affect the result.
+    pub fn range_eq(
+        &self,
+        start: usize,
+        other: &Self,
+        other_start: usize,
+        len: usize,
+    ) -> bool {
+        if len == 0 {
+            return true;
+        }
+        let per = Self::items_per_word();
+        if start % per != 0 || other_start % per != 0 {
+            return (0..len)
+                .all(|i| self.get(start + i) == other.get(other_start + i));
+        }
+        let (sw, ow) = (start / per, other_start / per);
+        let full = len / per;
+        if self.words[sw..sw + full] != other.words[ow..ow + full] {
+            return false;
+        }
+        let tail = len % per;
+        if tail == 0 {
+            return true;
+        }
+        let mask = (1usize << (tail * BITS as usize)) - 1;
+        (self.words[sw + full] & mask) == (other.words[ow + full] & mask)
+    }
+
     /// Count elements whose stored value equals `value`, over
     /// `[start, start+len)`.
     ///
@@ -456,6 +491,15 @@ pub trait BitPack: Clone + Default + core::fmt::Debug + Sized {
     fn extend_from_packed(&mut self, other: &Self, start: usize, len: usize);
     /// Append `count` lanes all equal to `value`.
     fn extend_fill(&mut self, value: usize, count: usize);
+    /// Whether `self`'s lanes `[start, start + len)` equal `other`'s lanes at
+    /// `other_start`.
+    fn range_eq(
+        &self,
+        start: usize,
+        other: &Self,
+        other_start: usize,
+        len: usize,
+    ) -> bool;
     /// Count elements equal to `value` in `[start, start+len)`.
     fn count_in(&self, start: usize, len: usize, value: usize) -> usize;
 }
@@ -533,6 +577,16 @@ impl<const BITS: u32> BitPack for PackedArray<BITS> {
     #[inline]
     fn extend_fill(&mut self, value: usize, count: usize) {
         PackedArray::extend_fill(self, value, count);
+    }
+    #[inline]
+    fn range_eq(
+        &self,
+        start: usize,
+        other: &Self,
+        other_start: usize,
+        len: usize,
+    ) -> bool {
+        PackedArray::range_eq(self, start, other, other_start, len)
     }
     #[inline]
     fn count_in(&self, start: usize, len: usize, value: usize) -> usize {
@@ -710,6 +764,45 @@ mod tests {
         check_bulk::<1>();
         check_bulk::<2>();
         check_bulk::<4>();
+    }
+
+    fn check_range_eq<const B: u32>() {
+        let per = (usize::BITS / B) as usize;
+        let mask = (1usize << B) - 1;
+        for n in [0, 1, per - 1, per, per + 1, 2 * per + 3] {
+            let mut a = PackedArray::<B>::new();
+            for i in 0..n {
+                a.push(i.wrapping_mul(11).wrapping_add(1) & mask);
+            }
+            // Same n lanes, but with junk left in the tail word past n.
+            let mut b = PackedArray::<B>::new();
+            for i in 0..n {
+                b.push(i.wrapping_mul(11).wrapping_add(1) & mask);
+            }
+            for i in 0..per {
+                b.push((i ^ 0x2a) & mask);
+            }
+            b.truncate(n);
+
+            assert!(a.range_eq(0, &b, 0, n), "aligned B={B} n={n}");
+            if n >= 2 {
+                // Unaligned start takes the per-lane path.
+                assert!(a.range_eq(1, &b, 1, n - 1), "unaligned B={B} n={n}");
+            }
+            if n > 0 {
+                let mut c = a.clone();
+                let last = c.get(n - 1);
+                c.set(n - 1, (last + 1) & mask);
+                assert!(!a.range_eq(0, &c, 0, n), "differ B={B} n={n}");
+            }
+        }
+    }
+
+    #[test]
+    fn range_eq_ignores_stale_tail_bits() {
+        check_range_eq::<1>();
+        check_range_eq::<2>();
+        check_range_eq::<4>();
     }
 
     // -----------------------------------------------------------------

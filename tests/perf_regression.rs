@@ -161,3 +161,27 @@ fn compact_iter_matches_oracle_all_directions() {
         assert_eq!(front, want, "interleaved n={n}");
     }
 }
+
+// Word-batched equality must ignore stale bits past the length: two columns
+// with equal lanes but different tail junk compare equal; a single differing
+// lane compares unequal.
+#[test]
+fn compact_eq_ignores_stale_tail_bits() {
+    use layout::{Compact, CompactVec};
+    for n in [0usize, 1, 64, 65, 200] {
+        let a: CompactVec<bool> =
+            (0..n).map(|i| Compact::new(i % 3 == 0)).collect();
+        let mut b: CompactVec<bool> =
+            (0..n + 40).map(|i| Compact::new(i % 3 == 0)).collect();
+        b.truncate(n);
+        assert_eq!(a, b);
+        assert_eq!(a.as_slice(), b.as_slice());
+        if n > 0 {
+            let mut c = a.clone();
+            let mid = n / 2;
+            let old = c.get(mid).unwrap().get();
+            c.set(mid, Compact::new(!old));
+            assert_ne!(a, c);
+        }
+    }
+}
