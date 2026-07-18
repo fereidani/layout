@@ -2446,8 +2446,10 @@ impl<'a, T: CompactRepr> Iterator for CompactChunks<'a, T> {
         if self.chunk_size == 0 {
             return (0, Some(0));
         }
+        // Non-overflowing ceiling division (`r + chunk_size` can wrap for a
+        // huge chunk size).
         let r = self.slice.len.saturating_sub(self.pos);
-        let c = (r + self.chunk_size - 1) / self.chunk_size;
+        let c = r / self.chunk_size + usize::from(r % self.chunk_size != 0);
         (c, Some(c))
     }
     #[inline]
@@ -2542,8 +2544,9 @@ impl<'a, T: CompactRepr> Iterator for CompactChunksMut<'a, T> {
         if self.chunk_size == 0 {
             return (0, Some(0));
         }
+        // Non-overflowing ceiling division (see `CompactChunks`).
         let r = self.len.saturating_sub(self.pos);
-        let c = (r + self.chunk_size - 1) / self.chunk_size;
+        let c = r / self.chunk_size + usize::from(r % self.chunk_size != 0);
         (c, Some(c))
     }
     #[inline]
