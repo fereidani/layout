@@ -172,16 +172,16 @@ impl<const BITS: u32> PackedArray<BITS> {
     pub fn push(&mut self, value: usize) {
         let per = Self::items_per_word();
         let off = Self::offset_of(self.len);
-        let word_idx = Self::word_of(self.len);
+        let bits = (value & Self::mask()) << off;
         if self.len % per == 0 {
-            // Starting a fresh word: it is zeroed, so OR is sufficient.
-            self.words.push(0);
+            // Fresh word (off == 0): store the value directly.
+            self.words.push(bits);
         } else {
-            // Pushing into a partially-filled word: clear the slot first,
-            // because `truncate`/`pop` may have left stale bits here.
-            self.words[word_idx] &= !(Self::mask() << off);
+            // Partial word: clear the slot (`truncate`/`pop` may have left
+            // stale bits) and set it, touching the tail word once.
+            let w = self.words.last_mut().expect("partial word exists");
+            *w = (*w & !(Self::mask() << off)) | bits;
         }
-        self.words[word_idx] |= (value & Self::mask()) << off;
         self.len += 1;
     }
 
