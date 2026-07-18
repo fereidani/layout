@@ -156,8 +156,10 @@ impl<'de, T: CompactRepr + serde::Deserialize<'de>> serde::Deserialize<'de>
 // ---------------------------------------------------------------------------
 
 pub struct CompactRefMut<'a, T: CompactRepr> {
-    // Exactly one of `direct` / `packed` is non-null.
-    direct: *mut T,
+    // Storage-backed mode: `packed` points at the column store and `index`
+    // addresses the lane. Direct mode (`index == DIRECT_INDEX`): `packed` is
+    // a disguised `*mut T` to a standalone owned value. The same sentinel
+    // scheme as `CompactPtr` keeps the handle at two words.
     packed: *mut Store<T>,
     index: usize,
     _marker: PhantomData<&'a mut ()>,
@@ -167,7 +169,6 @@ impl<'a, T: CompactRepr> CompactRefMut<'a, T> {
     #[inline(always)]
     pub(crate) fn from_packed(packed: &'a mut Store<T>, index: usize) -> Self {
         Self {
-            direct: core::ptr::null_mut(),
             packed: packed as *mut Store<T>,
             index,
             _marker: PhantomData,
@@ -186,7 +187,6 @@ impl<'a, T: CompactRepr> CompactRefMut<'a, T> {
         index: usize,
     ) -> Self {
         Self {
-            direct: core::ptr::null_mut(),
             packed,
             index,
             _marker: PhantomData,
@@ -196,9 +196,8 @@ impl<'a, T: CompactRepr> CompactRefMut<'a, T> {
     #[inline(always)]
     fn from_value(value: &'a mut T) -> Self {
         Self {
-            direct: value as *mut T,
-            packed: core::ptr::null_mut(),
-            index: 0,
+            packed: (value as *mut T).cast(),
+            index: DIRECT_INDEX,
             _marker: PhantomData,
         }
     }
@@ -208,21 +207,20 @@ impl<'a, T: CompactRepr> CompactRefMut<'a, T> {
     pub fn get(&self) -> T {
         // The packed (column) path is the overwhelmingly common one; the
         // direct path only fires for an owned value viewed as a RefMut.
-        if ::branches::likely(!self.packed.is_null()) {
+        if ::branches::likely(self.index != DIRECT_INDEX) {
             // SAFETY: `packed` aliases borrowed storage that is still live;
             // `index` is in bounds by construction.
             unsafe { T::decode((*self.packed).get_unchecked(self.index)) }
         } else {
-            // SAFETY: `direct` aliases the borrowed `&mut T` which is still
-            // live.
-            unsafe { *self.direct }
+            // SAFETY: `packed` disguises the borrowed `&mut T`, still live.
+            unsafe { *self.packed.cast::<T>() }
         }
     }
 
     /// Write `value` to the backing storage immediately.
     #[inline]
     pub fn set(&mut self, value: T) {
-        if ::branches::likely(!self.packed.is_null()) {
+        if ::branches::likely(self.index != DIRECT_INDEX) {
             // SAFETY: as above.
             unsafe {
                 (*self.packed).set_unchecked(self.index, T::encode(value));
@@ -230,7 +228,7 @@ impl<'a, T: CompactRepr> CompactRefMut<'a, T> {
         } else {
             // SAFETY: as above.
             unsafe {
-                *self.direct = value;
+                *self.packed.cast::<T>() = value;
             }
         }
     }
@@ -247,17 +245,10 @@ impl<'a, T: CompactRepr> CompactRefMut<'a, T> {
     }
 
     pub fn as_ptr(&self) -> CompactPtr<T> {
-        if self.packed.is_null() {
-            // Direct/owned mode: point straight at the borrowed value.
-            CompactPtr {
-                packed: (self.direct as *const T).cast(),
-                index: DIRECT_INDEX,
-            }
-        } else {
-            CompactPtr {
-                packed: self.packed as *const Store<T>,
-                index: self.index,
-            }
+        // Both modes carry over verbatim (the sentinel travels in `index`).
+        CompactPtr {
+            packed: self.packed as *const Store<T>,
+            index: self.index,
         }
     }
 
@@ -1771,14 +1762,16 @@ impl<'a, T: CompactRepr + core::hash::Hash> core::hash::Hash
 }
 
 // ---------------------------------------------------------------------------
-// CompactPtr / CompactPtrMut. A CompactPtr is either storage-backed (`packed`
+// CompactPtr / CompactPtrMut. A pointer is either storage-backed (`packed`
 // points to a column, `index` addresses the element) or direct (`packed`
-// holds a `*const T` to a standalone `Compact<T>` value, e.g. the compact
-// field of an immutable `Ref`, and `index` is `DIRECT_INDEX`). Direct
-// pointers keep element pointers derived from a `Ref` non-null and readable
-// instead of collapsing them to null. The sentinel keeps the layout at two
-// words and leaves every storage-backed code path unchanged. CompactPtrMut
-// has no direct mode: the direct/owned mutable path still yields null.
+// holds a pointer to a standalone `Compact<T>` value, e.g. the compact
+// field of a `Ref`/`RefMut` or an owned value, and `index` is
+// `DIRECT_INDEX`). Direct pointers keep element pointers derived from a
+// `Ref`/`RefMut` non-null and usable instead of collapsing them to null.
+// The sentinel keeps the layout at two words and leaves every
+// storage-backed code path unchanged. `CompactPtr::as_mut_ptr` is the one
+// exception: a direct CONST pointer borrows immutably, so there is no
+// storage a write could legally target and it converts to null.
 // ---------------------------------------------------------------------------
 
 /// `index` sentinel marking a direct `CompactPtr`. A storage-backed index can
@@ -1968,6 +1961,9 @@ impl<T: CompactRepr> CompactPtrMut<T> {
     pub unsafe fn as_ref(self) -> Option<Compact<T>> {
         if self.is_null() {
             None
+        } else if self.index == DIRECT_INDEX {
+            // SAFETY: a direct pointer disguises a live `*mut T`.
+            Some(Compact(*self.packed.cast::<T>()))
         } else {
             // SAFETY: the caller guarantees `index` addresses an initialized
             // element of the live storage.
@@ -1980,14 +1976,15 @@ impl<T: CompactRepr> CompactPtrMut<T> {
     ///
     /// # Safety
     ///
-    /// If non-null, `self.packed` must point to valid `Store<T>` storage,
-    /// `self.index` must address an initialized element within it, and the
-    /// caller must ensure no other references to the same element exist (no
-    /// aliasing).
+    /// If non-null, `self.packed` must point to valid `Store<T>` storage (or,
+    /// for a direct pointer, to a live `T`), `self.index` must address an
+    /// initialized element within it, and the caller must ensure no other
+    /// references to the same element exist (no aliasing).
     pub unsafe fn as_mut<'a>(self) -> Option<CompactRefMut<'a, T>> {
         if self.is_null() {
             None
         } else {
+            // Identical representation: the direct sentinel carries over.
             Some(CompactRefMut::from_packed_ptr(self.packed, self.index))
         }
     }
@@ -2049,9 +2046,14 @@ impl<T: CompactRepr> CompactPtrMut<T> {
     /// `self.packed` must point to valid `Store<T>` storage and `self.index`
     /// must address an initialized element within it.
     pub unsafe fn read(self) -> Compact<T> {
-        // SAFETY: the caller guarantees `index` addresses an initialized
-        // element of the live storage.
-        Compact(T::decode((*self.packed).get_unchecked(self.index)))
+        if self.index == DIRECT_INDEX {
+            // SAFETY: a direct pointer disguises a live `*mut T`.
+            Compact(*self.packed.cast::<T>())
+        } else {
+            // SAFETY: the caller guarantees `index` addresses an initialized
+            // element of the live storage.
+            Compact(T::decode((*self.packed).get_unchecked(self.index)))
+        }
     }
 
     /// Overwrites the element the pointer references (analogous to
@@ -2059,14 +2061,20 @@ impl<T: CompactRepr> CompactPtrMut<T> {
     ///
     /// # Safety
     ///
-    /// `self.packed` must point to valid `Store<T>` storage, `self.index` must
-    /// address a writable element within it, and the caller must ensure no
-    /// other references to the same element exist (no aliasing).
+    /// `self.packed` must point to valid `Store<T>` storage (or, for a direct
+    /// pointer, to a live, writable `T`), `self.index` must address a
+    /// writable element within it, and the caller must ensure no other
+    /// references to the same element exist (no aliasing).
     #[allow(clippy::forget_non_drop)]
     pub unsafe fn write(self, val: Compact<T>) {
-        // SAFETY: the caller guarantees `index` addresses a writable element
-        // of the live storage.
-        (*self.packed).set_unchecked(self.index, T::encode(val.0));
+        if self.index == DIRECT_INDEX {
+            // SAFETY: a direct pointer disguises a live, writable `*mut T`.
+            *self.packed.cast::<T>() = val.0;
+        } else {
+            // SAFETY: the caller guarantees `index` addresses a writable
+            // element of the live storage.
+            (*self.packed).set_unchecked(self.index, T::encode(val.0));
+        }
     }
 }
 

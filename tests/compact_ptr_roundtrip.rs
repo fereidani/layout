@@ -103,6 +103,22 @@ fn slice_element_ptr_roundtrip_with_compact_field() {
 }
 
 #[test]
+fn owned_ref_mut_ptr_roundtrip_writes_through() {
+    // A mutable handle to an owned value yields a working direct mut
+    // pointer: reads and writes reach the standalone value.
+    let mut c = Compact::new(false);
+    let mut h = c.as_mut();
+    let p = h.as_mut_ptr();
+    assert!(!p.is_null());
+    unsafe {
+        assert!(!p.read().get());
+        p.write(Compact::new(true));
+        assert!(p.as_ref().unwrap().get());
+    }
+    assert!(c.get());
+}
+
+#[test]
 fn column_pointers_stay_storage_backed() {
     let mut v = EVec::new();
     v.push(E {
