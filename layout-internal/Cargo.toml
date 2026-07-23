@@ -14,6 +14,6 @@ documentation = "https://docs.rs/layout/"
 proc-macro = true
 
 [dependencies]
-syn = { version = "2", features = ["derive", "extra-traits", "full", "visit", "visit-mut"] }
+syn = { version = "3", features = ["derive", "extra-traits", "full", "visit", "visit-mut"] }
 quote = "1"
 proc-macro2 = "1"
