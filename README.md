@@ -44,12 +44,12 @@ pub struct CheeseVec {
 `CheeseVec` has the same API as `Vec<Cheese>`, plus helper types that mirror how
 you borrow a `Cheese`:
 
-| Helper          | Stands in for |
-| --------------- | ------------- |
-| `CheeseSlice`   | `&[Cheese]`   |
-| `CheeseSliceMut`| `&mut [Cheese]`|
-| `CheeseRef`     | `&Cheese`     |
-| `CheeseRefMut`  | `&mut Cheese` |
+| Helper           | Stands in for   |
+| ---------------- | --------------- |
+| `CheeseSlice`    | `&[Cheese]`     |
+| `CheeseSliceMut` | `&mut [Cheese]` |
+| `CheeseRef`      | `&Cheese`       |
+| `CheeseRefMut`   | `&mut Cheese`   |
 
 Every derived struct implements the `SOA` trait. Use `<Cheese as SOA>::Type` when
 you need the generated type generically instead of naming `CheeseVec`.
@@ -91,14 +91,14 @@ impl Particle {
 `ParticleRef` holds references (`&T` rather than `T`), so the macro inserts
 dereferences where a method reads or writes a field by value:
 
-| Source               | Generated                      |
-| -------------------- | ------------------------------ |
-| `self.mass * 2.0`    | `(*self.mass) * 2.0`           |
-| `self.mass *= factor`| `*self.mass *= factor`         |
-| `self.mass = val`    | `*self.mass = val`             |
-| `self.name.len()`    | `self.name.len()` (auto-deref) |
-| `-self.x`            | `-(*self.x)`                   |
-| `self.x as i32`      | `(*self.x) as i32`             |
+| Source                | Generated                      |
+| --------------------- | ------------------------------ |
+| `self.mass * 2.0`     | `(*self.mass) * 2.0`           |
+| `self.mass *= factor` | `*self.mass *= factor`         |
+| `self.mass = val`     | `*self.mass = val`             |
+| `self.name.len()`     | `self.name.len()` (auto-deref) |
+| `-self.x`             | `-(*self.x)`                   |
+| `self.x as i32`       | `(*self.x) as i32`             |
 
 ### Compact columns (`Compact<T>`)
 
@@ -201,7 +201,7 @@ values; the feature works with `no_std` + `alloc`.
 
 ```toml
 [dependencies]
-layout = { version = "0.0.1", features = ["serde"] }
+layout = { version = "0.1", features = ["serde"] }
 serde  = { version = "1", features = ["derive"] }
 ```
 
@@ -214,7 +214,6 @@ pub struct Entity {
 }
 // EntityVec serializes to: {"id":[1,2],"active":[true,false]}
 ```
-
 
 The first argument picks the target type:
 
