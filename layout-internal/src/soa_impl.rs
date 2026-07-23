@@ -254,7 +254,7 @@ impl VisitMut for SelfFieldTransformer<'_> {
 
 fn is_ref_self_method(method: &syn::ImplItemFn) -> bool {
     if let Some(syn::FnArg::Receiver(receiver)) = method.sig.inputs.first() {
-        receiver.reference.is_some() && receiver.mutability.is_none()
+        matches!(receiver.kind, syn::ReceiverKind::Reference(_, _, None))
     } else {
         false
     }
@@ -262,7 +262,7 @@ fn is_ref_self_method(method: &syn::ImplItemFn) -> bool {
 
 fn is_mut_self_method(method: &syn::ImplItemFn) -> bool {
     if let Some(syn::FnArg::Receiver(receiver)) = method.sig.inputs.first() {
-        receiver.reference.is_some() && receiver.mutability.is_some()
+        matches!(receiver.kind, syn::ReceiverKind::Reference(_, _, Some(_)))
     } else {
         false
     }
