@@ -734,6 +734,11 @@ impl<const BITS: u32> Clone for PackedArray<BITS> {
 /// purely through this trait, so the column code is independent of the exact
 /// bit width.
 pub trait BitPack: Clone + Default + core::fmt::Debug + Sized {
+    /// Bits per lane in this store. A compact column derives its own lane
+    /// arithmetic from [`CompactRepr::BITS`](crate::CompactRepr::BITS), so the
+    /// two must agree; the column asserts it at compile time.
+    const BITS: u32;
+
     /// Create an empty store.
     fn new() -> Self;
     /// Create an empty store with capacity for at least `capacity` elements.
@@ -807,6 +812,8 @@ pub trait BitPack: Clone + Default + core::fmt::Debug + Sized {
 }
 
 impl<const BITS: u32> BitPack for PackedArray<BITS> {
+    const BITS: u32 = BITS;
+
     #[inline]
     fn new() -> Self {
         PackedArray::new()

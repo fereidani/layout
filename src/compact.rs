@@ -46,6 +46,11 @@ fn assert_in_bounds(index: usize, len: usize) {
 /// Resolve `range` against a column of `len` elements into a `start..end`
 /// pair, following `Vec`'s slice-index semantics. The caller still validates
 /// the pair against the column.
+///
+/// The inclusive bounds saturate rather than wrap: `usize::MAX` has no
+/// exclusive equivalent, so it is carried through as `usize::MAX`, which no
+/// column can hold and every caller's range check rejects. Wrapping would
+/// turn `..=usize::MAX` into the empty `0..0` and silently do nothing.
 fn resolve_range<R: core::ops::RangeBounds<usize>>(
     range: R,
     len: usize,
@@ -53,11 +58,11 @@ fn resolve_range<R: core::ops::RangeBounds<usize>>(
     use core::ops::Bound;
     let start = match range.start_bound() {
         Bound::Included(&i) => i,
-        Bound::Excluded(&i) => i + 1,
+        Bound::Excluded(&i) => i.saturating_add(1),
         Bound::Unbounded => 0,
     };
     let end = match range.end_bound() {
-        Bound::Included(&i) => i + 1,
+        Bound::Included(&i) => i.saturating_add(1),
         Bound::Excluded(&i) => i,
         Bound::Unbounded => len,
     };
@@ -70,12 +75,44 @@ fn resolve_range<R: core::ops::RangeBounds<usize>>(
 /// Implemented for `bool` (1 bit) and, via `#[derive(CompactRepr)]`, for
 /// fieldless enums. Implementors (and their storage) must be `'static` so that
 /// borrowed column views of any lifetime are well-formed.
+///
+/// [`BITS`](Self::BITS) must agree with the lane width of
+/// [`Storage`](Self::Storage). An impl that disagrees builds a column of the
+/// wrong shape, so constructing one is rejected:
+///
+/// ```compile_fail
+/// use layout::{bitpack::PackedArray, CompactRepr, CompactVec};
+///
+/// #[derive(Clone, Copy)]
+/// struct Wrong;
+///
+/// impl CompactRepr for Wrong {
+///     // 4-bit storage, but the column is told each lane is 8 bits wide.
+///     type Storage = PackedArray<4>;
+///     const BITS: u32 = 8;
+///     fn encode(self) -> usize {
+///         0
+///     }
+///     fn decode(_raw: usize) -> Self {
+///         Wrong
+///     }
+/// }
+///
+/// let _ = CompactVec::<Wrong>::new();
+/// ```
+///
+/// The same impl with `const BITS: u32 = 4` builds and works.
 pub trait CompactRepr: Copy + Sized + 'static {
     /// The bit-packed storage backing a column of this type. Each impl picks
     /// a concrete `PackedArray<N>`.
     type Storage: BitPack + 'static;
 
     /// Number of bits used per element (`1` for `bool`; `2`/`4` for enums).
+    ///
+    /// Must equal `<Self::Storage as BitPack>::BITS`: the column derives its
+    /// lane arithmetic from this constant but reads raw words out of the
+    /// storage, so a mismatch addresses the wrong bits. Building a column of
+    /// a `T` whose two items disagree is rejected at compile time.
     const BITS: u32;
 
     /// Encode `self` into the raw integer stored in the packed words.
@@ -394,9 +431,27 @@ pub struct CompactVec<T: CompactRepr> {
     inner: Store<T>,
 }
 
+/// Compile-time guard that a [`CompactRepr`] impl's declared width matches the
+/// storage backing it.
+///
+/// `#[derive(CompactRepr)]` always emits a consistent pair, but the trait is
+/// public and its two items are chosen independently, so a hand-written impl
+/// can disagree. Evaluating [`OK`](Self::OK) from every column constructor
+/// turns that into a build failure instead of lane reads that silently
+/// address the wrong bits.
+struct WidthCheck<T: CompactRepr>(PhantomData<T>);
+
+impl<T: CompactRepr> WidthCheck<T> {
+    const OK: () = assert!(
+        T::BITS == <Store<T> as BitPack>::BITS,
+        "CompactRepr::BITS must equal the lane width of CompactRepr::Storage"
+    );
+}
+
 impl<T: CompactRepr> Default for CompactVec<T> {
     #[inline]
     fn default() -> Self {
+        let () = WidthCheck::<T>::OK;
         Self {
             inner: Default::default(),
         }
@@ -471,6 +526,7 @@ impl<T: CompactRepr> CompactVec<T> {
 
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
+        let () = WidthCheck::<T>::OK;
         Self {
             inner: Store::<T>::with_capacity(capacity),
         }
