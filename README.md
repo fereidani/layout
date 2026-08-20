@@ -1,7 +1,7 @@
 # Layout: struct-of-arrays and data-oriented design in Rust
 
 <p align="center">
-  <img src="logo.png" alt="Layout logo" width="480">
+  <img src="logo.svg" alt="Layout logo" width="480">
 </p>
 
 [![Crates.io](https://img.shields.io/crates/v/layout.svg?style=for-the-badge)](https://crates.io/crates/layout)
