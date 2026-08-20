@@ -19,13 +19,20 @@
 //! will generate a `CheeseVec` struct that looks like this:
 //!
 //! ```
+//! use layout::Column;
+//!
 //! pub struct CheeseVec {
-//!     pub smell: Vec<f64>,
-//!     pub color: Vec<(f64, f64, f64)>,
-//!     pub with_mushrooms: Vec<bool>,
-//!     pub name: Vec<String>,
+//!     pub smell: Column<f64>,
+//!     pub color: Column<(f64, f64, f64)>,
+//!     pub with_mushrooms: Column<bool>,
+//!     pub name: Column<String>,
 //! }
 //! ```
+//!
+//! Each field is a [`Column<T>`], which dereferences to `[T]` and so reads
+//! like a `Vec<T>`, but keeps length changes behind `unsafe` so that safe
+//! code cannot desynchronize the columns. A field declared
+//! `Compact<T>`/`CompactBool` becomes a bit-packed [`CompactVec<T>`] instead.
 //!
 //! It will also generate the same functions that a `Vec<Cheese>` would have,
 //! and a few helper structs: `CheeseSlice`, `CheeseSliceMut`, `CheeseRef` and
@@ -303,10 +310,13 @@ pub use compact::{
 /// Derive macro implementing [`CompactRepr`] for a fieldless enum.
 ///
 /// Requires an unsigned `#[repr(uN)]`. Storage width is sized by the
-/// largest discriminant (`1`/`2`/`4`/`8`/`16` bits). The trait and this
-/// derive share the name `CompactRepr` in the type and macro namespaces
-/// respectively (like `serde::Serialize`), so `#[derive(CompactRepr)]` and
-/// `impl CompactRepr` both resolve at the crate root.
+/// largest discriminant (`1`, `2` or `4` bits); an enum needing more than
+/// 4 bits is rejected, since from 8 bits up a compact column is the same
+/// size as a plain one and only adds encode/decode work. The trait and
+/// this derive share the name `CompactRepr` in the type and macro
+/// namespaces respectively (like `serde::Serialize`), so
+/// `#[derive(CompactRepr)]` and `impl CompactRepr` both resolve at the
+/// crate root.
 pub use layout_internal::CompactRepr;
 // Sorting helpers used by the macro-generated code. Inlining the inverse
 // permutation here (instead of depending on the `permutation` crate) keeps

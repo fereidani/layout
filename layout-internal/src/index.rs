@@ -1,5 +1,5 @@
-use proc_macro2::TokenStream;
-use quote::quote;
+use proc_macro2::{Ident, Span, TokenStream};
+use quote::{quote, TokenStreamExt};
 
 use crate::{input::Input, names};
 
@@ -10,11 +10,7 @@ pub fn derive(input: &Input) -> TokenStream {
     let ref_name = names::ref_name(&input.name);
     let ref_mut_name = names::ref_mut_name(&input.name);
 
-    let fields_names = &input
-        .fields
-        .iter()
-        .map(|field| field.ident.clone().unwrap())
-        .collect::<Vec<_>>();
+    let fields_names = &input.field_idents();
     let first_field_name = &fields_names[0];
 
     let get_unchecked = input
@@ -46,11 +42,26 @@ pub fn derive(input: &Input) -> TokenStream {
     // The Ref construction sites below use trailing-comma field lists, so the
     // marker init carries no leading comma. Only non-empty for all-compact
     // structs (whose `Ref<'a>` needs a PhantomData marker to use its lifetime).
-    let ref_marker_init: TokenStream = if input.ref_needs_lifetime_marker() {
-        quote! { __layout_ref_marker: ::core::marker::PhantomData }
-    } else {
-        quote! {}
+    let ref_marker_init = input.ref_marker_init(false);
+
+    // The `Vec` and slice receivers differ only in how a range index reaches
+    // the columns, so the forwarding families are generated once per target.
+    let vec_target = Target {
+        recv: Ident::new("soa", Span::call_site()),
+        ty: quote! { &'a #vec_name },
+        ty_mut: quote! { &'a mut #vec_name },
+        slice: quote! { #slice_name<'a> },
+        slice_mut: quote! { #slice_mut_name<'a> },
     };
+    let slice_target = Target {
+        recv: Ident::new("slice", Span::call_site()),
+        ty: quote! { #slice_name<'a> },
+        ty_mut: quote! { #slice_mut_name<'a> },
+        slice: quote! { #slice_name<'a> },
+        slice_mut: quote! { #slice_mut_name<'a> },
+    };
+    let vec_delegating = vec_target.delegating_ranges();
+    let slice_delegating = slice_target.delegating_ranges();
 
     quote! {
         // usize
@@ -146,85 +157,6 @@ pub fn derive(input: &Input) -> TokenStream {
                ::layout::SoAIndexMut::index_mut(self, soa.as_mut_slice())
             }
         }
-
-        // RangeTo<usize>
-        impl<'a> ::layout::SoAIndex<&'a #vec_name> for ::core::ops::RangeTo<usize> {
-            type RefOutput = #slice_name<'a>;
-
-            #[inline]
-            fn get(self, soa: &'a #vec_name) -> Option<Self::RefOutput> {
-                ::layout::SoAIndex::get(0..self.end, soa)
-            }
-
-            #[inline]
-            unsafe fn get_unchecked(self, soa: &'a #vec_name) -> Self::RefOutput {
-                ::layout::SoAIndex::get_unchecked(0..self.end, soa)
-            }
-
-            #[inline]
-            fn index(self, soa: &'a #vec_name) -> Self::RefOutput {
-                ::layout::SoAIndex::index(0..self.end, soa)
-            }
-        }
-
-        impl<'a> ::layout::SoAIndexMut<&'a mut #vec_name> for ::core::ops::RangeTo<usize> {
-            type MutOutput = #slice_mut_name<'a>;
-
-            #[inline]
-            fn get_mut(self, soa: &'a mut #vec_name) -> Option<Self::MutOutput> {
-                ::layout::SoAIndexMut::get_mut(0..self.end, soa)
-            }
-
-            #[inline]
-            unsafe fn get_unchecked_mut(self, soa: &'a mut #vec_name) -> Self::MutOutput {
-                ::layout::SoAIndexMut::get_unchecked_mut(0..self.end, soa)
-            }
-
-            #[inline]
-            fn index_mut(self, soa: &'a mut #vec_name) -> Self::MutOutput {
-                ::layout::SoAIndexMut::index_mut(0..self.end, soa)
-            }
-        }
-
-        // RangeFrom<usize>
-        impl<'a> ::layout::SoAIndex<&'a #vec_name> for ::core::ops::RangeFrom<usize> {
-            type RefOutput = #slice_name<'a>;
-
-            #[inline]
-            fn get(self, soa: &'a #vec_name) -> Option<Self::RefOutput> {
-                ::layout::SoAIndex::get(self.start..soa.len(), soa)
-            }
-
-            #[inline]
-            unsafe fn get_unchecked(self, soa: &'a #vec_name) -> Self::RefOutput {
-                ::layout::SoAIndex::get_unchecked(self.start..soa.len(), soa)
-            }
-
-            #[inline]
-            fn index(self, soa: &'a #vec_name) -> Self::RefOutput {
-                ::layout::SoAIndex::index(self.start..soa.len(), soa)
-            }
-        }
-
-        impl<'a> ::layout::SoAIndexMut<&'a mut #vec_name> for ::core::ops::RangeFrom<usize> {
-            type MutOutput = #slice_mut_name<'a>;
-
-            #[inline]
-            fn get_mut(self, soa: &'a mut #vec_name) -> Option<Self::MutOutput> {
-               ::layout::SoAIndexMut::get_mut(self.start..soa.len(), soa)
-            }
-
-            #[inline]
-            unsafe fn get_unchecked_mut(self, soa: &'a mut #vec_name) -> Self::MutOutput {
-                ::layout::SoAIndexMut::get_unchecked_mut(self.start..soa.len(), soa)
-            }
-
-            #[inline]
-            fn index_mut(self, soa: &'a mut #vec_name) -> Self::MutOutput {
-                ::layout::SoAIndexMut::index_mut(self.start..soa.len(), soa)
-            }
-        }
-
         // RangeFull
         impl<'a> ::layout::SoAIndex<&'a #vec_name> for ::core::ops::RangeFull {
             type RefOutput = #slice_name<'a>;
@@ -263,92 +195,7 @@ pub fn derive(input: &Input) -> TokenStream {
                 soa.as_mut_slice()
             }
         }
-
-        // RangeInclusive<usize>
-        impl<'a> ::layout::SoAIndex<&'a #vec_name> for ::core::ops::RangeInclusive<usize> {
-            type RefOutput = #slice_name<'a>;
-
-            #[inline]
-            fn get(self, soa: &'a #vec_name) -> Option<Self::RefOutput> {
-                if *self.end() == usize::MAX {
-                    None
-                } else {
-                    ::layout::SoAIndex::get(*self.start()..self.end().saturating_add(1), soa)
-                }
-            }
-
-            #[inline]
-            unsafe fn get_unchecked(self, soa: &'a #vec_name) -> Self::RefOutput {
-                ::layout::SoAIndex::get_unchecked(*self.start()..self.end().saturating_add(1), soa)
-            }
-
-            #[inline]
-            fn index(self, soa: &'a #vec_name) -> Self::RefOutput {
-                ::layout::SoAIndex::index(*self.start()..self.end().saturating_add(1), soa)
-            }
-        }
-
-        impl<'a> ::layout::SoAIndexMut<&'a mut #vec_name> for ::core::ops::RangeInclusive<usize> {
-            type MutOutput = #slice_mut_name<'a>;
-
-            #[inline]
-            fn get_mut(self, soa: &'a mut #vec_name) -> Option<Self::MutOutput> {
-                if *self.end() == usize::MAX {
-                    None
-                } else {
-                    ::layout::SoAIndexMut::get_mut(*self.start()..self.end().saturating_add(1), soa)
-                }
-            }
-
-            #[inline]
-            unsafe fn get_unchecked_mut(self, soa: &'a mut #vec_name) -> Self::MutOutput {
-                ::layout::SoAIndexMut::get_unchecked_mut(*self.start()..self.end().saturating_add(1), soa)
-            }
-
-            #[inline]
-            fn index_mut(self, soa: &'a mut #vec_name) -> Self::MutOutput {
-                ::layout::SoAIndexMut::index_mut(*self.start()..self.end().saturating_add(1), soa)
-            }
-        }
-
-        // RangeToInclusive<usize>
-        impl<'a> ::layout::SoAIndex<&'a #vec_name> for ::core::ops::RangeToInclusive<usize> {
-            type RefOutput = #slice_name<'a>;
-
-            #[inline]
-            fn get(self, soa: &'a #vec_name) -> Option<Self::RefOutput> {
-                ::layout::SoAIndex::get(0..=self.end, soa)
-            }
-
-            #[inline]
-            unsafe fn get_unchecked(self, soa: &'a #vec_name) -> Self::RefOutput {
-                ::layout::SoAIndex::get_unchecked(0..=self.end, soa)
-            }
-
-            #[inline]
-            fn index(self, soa: &'a #vec_name) -> Self::RefOutput {
-                ::layout::SoAIndex::index(0..=self.end, soa)
-            }
-        }
-
-        impl<'a> ::layout::SoAIndexMut<&'a mut #vec_name> for ::core::ops::RangeToInclusive<usize> {
-            type MutOutput = #slice_mut_name<'a>;
-
-            #[inline]
-            fn get_mut(self, soa: &'a mut #vec_name) -> Option<Self::MutOutput> {
-                ::layout::SoAIndexMut::get_mut(0..=self.end, soa)
-            }
-
-            #[inline]
-            unsafe fn get_unchecked_mut(self, soa: &'a mut #vec_name) -> Self::MutOutput {
-                ::layout::SoAIndexMut::get_unchecked_mut(0..=self.end, soa)
-            }
-
-            #[inline]
-            fn index_mut(self, soa: &'a mut #vec_name) -> Self::MutOutput {
-                ::layout::SoAIndexMut::index_mut(0..=self.end, soa)
-            }
-        }
+        #vec_delegating
 
         // usize
         impl<'a> ::layout::SoAIndex<#slice_name<'a>> for usize {
@@ -465,87 +312,6 @@ pub fn derive(input: &Input) -> TokenStream {
         }
 
 
-
-        // RangeTo<usize>
-        impl<'a> ::layout::SoAIndex<#slice_name<'a>> for ::core::ops::RangeTo<usize> {
-            type RefOutput = #slice_name<'a>;
-
-            #[inline]
-            fn get(self, slice: #slice_name<'a>) -> Option<Self::RefOutput> {
-                ::layout::SoAIndex::get(0..self.end, slice)
-            }
-
-            #[inline]
-            unsafe fn get_unchecked(self, slice: #slice_name<'a>) -> Self::RefOutput {
-                ::layout::SoAIndex::get_unchecked(0..self.end, slice)
-            }
-
-            #[inline]
-            fn index(self, slice: #slice_name<'a>) -> Self::RefOutput {
-                ::layout::SoAIndex::index(0..self.end, slice)
-            }
-        }
-
-        impl<'a> ::layout::SoAIndexMut<#slice_mut_name<'a>> for ::core::ops::RangeTo<usize> {
-            type MutOutput = #slice_mut_name<'a>;
-
-            #[inline]
-            fn get_mut(self, slice: #slice_mut_name<'a>) -> Option<Self::MutOutput> {
-                ::layout::SoAIndexMut::get_mut(0..self.end, slice)
-            }
-
-            #[inline]
-            unsafe fn get_unchecked_mut(self, slice: #slice_mut_name<'a>) -> Self::MutOutput {
-                ::layout::SoAIndexMut::get_unchecked_mut(0..self.end, slice)
-            }
-
-            #[inline]
-            fn index_mut(self, slice: #slice_mut_name<'a>) -> Self::MutOutput {
-                ::layout::SoAIndexMut::index_mut(0..self.end, slice)
-            }
-        }
-
-
-        // RangeFrom<usize>
-        impl<'a> ::layout::SoAIndex<#slice_name<'a>> for ::core::ops::RangeFrom<usize> {
-            type RefOutput = #slice_name<'a>;
-
-            #[inline]
-            fn get(self, slice: #slice_name<'a>) -> Option<Self::RefOutput> {
-                ::layout::SoAIndex::get(self.start..slice.len(), slice)
-            }
-
-            #[inline]
-            unsafe fn get_unchecked(self, slice: #slice_name<'a>) -> Self::RefOutput {
-                ::layout::SoAIndex::get_unchecked(self.start..slice.len(), slice)
-            }
-
-            #[inline]
-            fn index(self, slice: #slice_name<'a>) -> Self::RefOutput {
-                ::layout::SoAIndex::index(self.start..slice.len(), slice)
-            }
-        }
-
-        impl<'a> ::layout::SoAIndexMut<#slice_mut_name<'a>> for ::core::ops::RangeFrom<usize> {
-            type MutOutput = #slice_mut_name<'a>;
-
-            #[inline]
-            fn get_mut(self, slice: #slice_mut_name<'a>) -> Option<Self::MutOutput> {
-                ::layout::SoAIndexMut::get_mut(self.start..slice.len(), slice)
-            }
-
-            #[inline]
-            unsafe fn get_unchecked_mut(self, slice: #slice_mut_name<'a>) -> Self::MutOutput {
-                ::layout::SoAIndexMut::get_unchecked_mut(self.start..slice.len(), slice)
-            }
-
-            #[inline]
-            fn index_mut(self, slice: #slice_mut_name<'a>) -> Self::MutOutput {
-                ::layout::SoAIndexMut::index_mut(self.start..slice.len(), slice)
-            }
-        }
-
-
         // RangeFull
         impl<'a> ::layout::SoAIndex<#slice_name<'a>> for ::core::ops::RangeFull {
             type RefOutput = #slice_name<'a>;
@@ -585,92 +351,145 @@ pub fn derive(input: &Input) -> TokenStream {
             }
         }
 
+        #slice_delegating
+    }
+}
+/// One indexing receiver: the `SoAIndex` / `SoAIndexMut` impl target and the
+/// slice types a range index yields for it.
+struct Target {
+    /// Name the generated method bodies bind the receiver to.
+    recv: Ident,
+    /// Receiver type of the immutable impls.
+    ty: TokenStream,
+    /// Receiver type of the mutable impls.
+    ty_mut: TokenStream,
+    /// `SoAIndex::RefOutput` of a range index.
+    slice: TokenStream,
+    /// `SoAIndexMut::MutOutput` of a range index.
+    slice_mut: TokenStream,
+}
 
-        // RangeInclusive<usize>
-        impl<'a> ::layout::SoAIndex<#slice_name<'a>> for ::core::ops::RangeInclusive<usize> {
-            type RefOutput = #slice_name<'a>;
+impl Target {
+    /// Emit the `SoAIndex` / `SoAIndexMut` pair for a range type whose three
+    /// methods all forward to the equivalent `range` (an expression in terms
+    /// of `self` and the receiver binding). When `none_if` is given, `get`
+    /// and `get_mut` return `None` on that condition instead of forwarding.
+    fn delegating(
+        &self,
+        index_ty: &TokenStream,
+        range: &TokenStream,
+        none_if: Option<&TokenStream>,
+    ) -> TokenStream {
+        let Target {
+            recv,
+            ty,
+            ty_mut,
+            slice,
+            slice_mut,
+        } = self;
+        let (get, get_mut) = match none_if {
+            Some(cond) => (
+                quote! {
+                    if #cond {
+                        None
+                    } else {
+                        ::layout::SoAIndex::get(#range, #recv)
+                    }
+                },
+                quote! {
+                    if #cond {
+                        None
+                    } else {
+                        ::layout::SoAIndexMut::get_mut(#range, #recv)
+                    }
+                },
+            ),
+            None => (
+                quote! { ::layout::SoAIndex::get(#range, #recv) },
+                quote! { ::layout::SoAIndexMut::get_mut(#range, #recv) },
+            ),
+        };
+        quote! {
+            impl<'a> ::layout::SoAIndex<#ty> for #index_ty {
+                type RefOutput = #slice;
 
-            #[inline]
-            fn get(self, slice: #slice_name<'a>) -> Option<Self::RefOutput> {
-                if *self.end() == usize::MAX {
-                    None
-                } else {
-                    ::layout::SoAIndex::get(*self.start()..self.end().saturating_add(1), slice)
+                #[inline]
+                fn get(self, #recv: #ty) -> Option<Self::RefOutput> {
+                    #get
+                }
+
+                #[inline]
+                unsafe fn get_unchecked(self, #recv: #ty) -> Self::RefOutput {
+                    ::layout::SoAIndex::get_unchecked(#range, #recv)
+                }
+
+                #[inline]
+                fn index(self, #recv: #ty) -> Self::RefOutput {
+                    ::layout::SoAIndex::index(#range, #recv)
                 }
             }
 
-            #[inline]
-            unsafe fn get_unchecked(self, slice: #slice_name<'a>) -> Self::RefOutput {
-                ::layout::SoAIndex::get_unchecked(*self.start()..self.end().saturating_add(1), slice)
-            }
+            impl<'a> ::layout::SoAIndexMut<#ty_mut> for #index_ty {
+                type MutOutput = #slice_mut;
 
-            #[inline]
-            fn index(self, slice: #slice_name<'a>) -> Self::RefOutput {
-                ::layout::SoAIndex::index(*self.start()..self.end().saturating_add(1), slice)
-            }
-        }
+                #[inline]
+                fn get_mut(self, #recv: #ty_mut) -> Option<Self::MutOutput> {
+                    #get_mut
+                }
 
-        impl<'a> ::layout::SoAIndexMut<#slice_mut_name<'a>> for ::core::ops::RangeInclusive<usize> {
-            type MutOutput = #slice_mut_name<'a>;
+                #[inline]
+                unsafe fn get_unchecked_mut(
+                    self,
+                    #recv: #ty_mut,
+                ) -> Self::MutOutput {
+                    ::layout::SoAIndexMut::get_unchecked_mut(#range, #recv)
+                }
 
-            #[inline]
-            fn get_mut(self, slice: #slice_mut_name<'a>) -> Option<Self::MutOutput> {
-                if *self.end() == usize::MAX {
-                    None
-                } else {
-                    ::layout::SoAIndexMut::get_mut(*self.start()..self.end().saturating_add(1), slice)
+                #[inline]
+                fn index_mut(self, #recv: #ty_mut) -> Self::MutOutput {
+                    ::layout::SoAIndexMut::index_mut(#range, #recv)
                 }
             }
-
-            #[inline]
-            unsafe fn get_unchecked_mut(self, slice: #slice_mut_name<'a>) -> Self::MutOutput {
-                ::layout::SoAIndexMut::get_unchecked_mut(*self.start()..self.end().saturating_add(1), slice)
-            }
-
-            #[inline]
-            fn index_mut(self, slice: #slice_mut_name<'a>) -> Self::MutOutput {
-                ::layout::SoAIndexMut::index_mut(*self.start()..self.end().saturating_add(1), slice)
-            }
         }
+    }
 
-
-        // RangeToInclusive<usize>
-        impl<'a> ::layout::SoAIndex<#slice_name<'a>> for ::core::ops::RangeToInclusive<usize> {
-            type RefOutput = #slice_name<'a>;
-
-            #[inline]
-            fn get(self, slice: #slice_name<'a>) -> Option<Self::RefOutput> {
-                ::layout::SoAIndex::get(0..=self.end, slice)
-            }
-
-            #[inline]
-            unsafe fn get_unchecked(self, slice: #slice_name<'a>) -> Self::RefOutput {
-                ::layout::SoAIndex::get_unchecked(0..=self.end, slice)
-            }
-
-            #[inline]
-            fn index(self, slice: #slice_name<'a>) -> Self::RefOutput {
-                ::layout::SoAIndex::index(0..=self.end, slice)
-            }
+    /// Emit every range family that forwards to an equivalent `Range<usize>`
+    /// (`RangeToInclusive` forwards to `RangeInclusive`, which normalizes it).
+    /// `Range` itself, `usize` and `RangeFull` do the real work and are
+    /// written out by the caller.
+    fn delegating_ranges(&self) -> TokenStream {
+        let recv = &self.recv;
+        let families = [
+            (
+                quote! { ::core::ops::RangeTo<usize> },
+                quote! { 0..self.end },
+                None,
+            ),
+            (
+                quote! { ::core::ops::RangeFrom<usize> },
+                quote! { self.start..#recv.len() },
+                None,
+            ),
+            (
+                quote! { ::core::ops::RangeInclusive<usize> },
+                quote! { *self.start()..self.end().saturating_add(1) },
+                // `usize::MAX` has no exclusive-end equivalent.
+                Some(quote! { *self.end() == usize::MAX }),
+            ),
+            (
+                quote! { ::core::ops::RangeToInclusive<usize> },
+                quote! { 0..=self.end },
+                None,
+            ),
+        ];
+        let mut generated = TokenStream::new();
+        for (index_ty, range, none_if) in &families {
+            generated.append_all(self.delegating(
+                index_ty,
+                range,
+                none_if.as_ref(),
+            ));
         }
-
-        impl<'a> ::layout::SoAIndexMut<#slice_mut_name<'a>> for ::core::ops::RangeToInclusive<usize> {
-            type MutOutput = #slice_mut_name<'a>;
-
-            #[inline]
-            fn get_mut(self, slice: #slice_mut_name<'a>) -> Option<Self::MutOutput> {
-                ::layout::SoAIndexMut::get_mut(0..=self.end, slice)
-            }
-
-            #[inline]
-            unsafe fn get_unchecked_mut(self, slice: #slice_mut_name<'a>) -> Self::MutOutput {
-                ::layout::SoAIndexMut::get_unchecked_mut(0..=self.end, slice)
-            }
-
-            #[inline]
-            fn index_mut(self, slice: #slice_mut_name<'a>) -> Self::MutOutput {
-                ::layout::SoAIndexMut::index_mut(0..=self.end, slice)
-            }
-        }
+        generated
     }
 }

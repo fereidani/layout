@@ -1,4 +1,4 @@
-use proc_macro2::{Ident, Span, TokenStream};
+use proc_macro2::TokenStream;
 use quote::quote;
 
 use crate::{input::Input, names};
@@ -15,7 +15,7 @@ pub fn derive(input: &Input) -> TokenStream {
     let fields_types = &input
         .fields
         .iter()
-        .map(|field| field.ty.clone())
+        .map(|field| &field.ty)
         .collect::<Vec<_>>();
 
     let doc_url = format!("[`{0}`](struct.{0}.html)", name);
@@ -23,20 +23,9 @@ pub fn derive(input: &Input) -> TokenStream {
     let ref_doc_url = format!("[`{0}`](struct.{0}.html)", ref_name);
     let ref_mut_doc_url = format!("[`{0}`](struct.{0}.html)", ref_mut_name);
 
-    let fields_names = &input
-        .fields
-        .iter()
-        .map(|field| field.ident.clone().unwrap())
-        .collect::<Vec<_>>();
+    let fields_names = &input.field_idents();
 
-    let fields_names_hygienic = input
-        .fields
-        .iter()
-        .enumerate()
-        .map(|(i, _)| {
-            Ident::new(&format!("___layout_private_{}", i), Span::call_site())
-        })
-        .collect::<Vec<_>>();
+    let fields_names_hygienic = input.hygienic_idents("");
 
     let ref_fields_types = input
         .map_fields_nested_or(
@@ -57,12 +46,7 @@ pub fn derive(input: &Input) -> TokenStream {
     let ref_mut_fields_types = input
         .map_fields_nested_or(
             |_, field_type, compact| {
-                if let Some(inner) = compact {
-                    names::ref_mut_name_compact(inner)
-                } else {
-                    let field_ptr_type = names::ref_mut_name(field_type);
-                    quote! { #field_ptr_type<'a> }
-                }
+                names::nested_ref_mut_ty(field_type, compact)
             },
             |_, field_type| quote! { &'a mut #field_type },
         )
@@ -124,11 +108,7 @@ pub fn derive(input: &Input) -> TokenStream {
     };
     // `as_ref` builds the ref with a trailing-comma field list, so the init
     // carries no leading comma.
-    let ref_marker_init: TokenStream = if input.ref_needs_lifetime_marker() {
-        quote! { __layout_ref_marker: ::core::marker::PhantomData }
-    } else {
-        quote! {}
-    };
+    let ref_marker_init = input.ref_marker_init(false);
 
     quote! {
         /// A reference to a

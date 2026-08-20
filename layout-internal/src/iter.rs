@@ -18,16 +18,12 @@ pub fn derive(input: &Input) -> TokenStream {
     let ref_doc_url = format!("[`{0}`](struct.{0}.html)", ref_name);
     let ref_mut_doc_url = format!("[`{0}`](struct.{0}.html)", ref_mut_name);
 
-    let fields_names = &input
-        .fields
-        .iter()
-        .map(|field| field.ident.clone().unwrap())
-        .collect::<Vec<_>>();
+    let fields_names = &input.field_idents();
 
     let fields_types = &input
         .fields
         .iter()
-        .map(|field| field.ty.clone())
+        .map(|field| &field.ty)
         .collect::<Vec<_>>();
 
     // Remaining-length counter; hygienic name so it cannot collide with a
@@ -67,11 +63,7 @@ pub fn derive(input: &Input) -> TokenStream {
     // The Ref construction sites below use trailing-comma field-init shorthand,
     // so the marker init carries no leading comma. Only non-empty for
     // all-compact structs.
-    let ref_marker_init: TokenStream = if input.ref_needs_lifetime_marker() {
-        quote! { __layout_ref_marker: ::core::marker::PhantomData }
-    } else {
-        quote! {}
-    };
+    let ref_marker_init = input.ref_marker_init(false);
 
     let generated = quote! {
         /// Iterator over

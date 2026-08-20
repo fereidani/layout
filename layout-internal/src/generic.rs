@@ -3,6 +3,25 @@ use quote::quote;
 
 use crate::{input::Input, names};
 
+/// Statements resolving an arbitrary `RangeBounds` argument named `index` into
+/// the `start..end` pair the generated `index`/`index_mut` methods take.
+/// Emitted verbatim into every `slice`-like trait method body.
+fn resolve_range() -> TokenStream {
+    quote! {
+        let start = match index.start_bound() {
+            core::ops::Bound::Included(i) => *i,
+            core::ops::Bound::Excluded(i) => i.saturating_add(1),
+            core::ops::Bound::Unbounded => 0,
+        };
+        let n = self.len();
+        let end = match index.end_bound() {
+            core::ops::Bound::Included(i) => (*i).saturating_add(1),
+            core::ops::Bound::Excluded(i) => *i,
+            core::ops::Bound::Unbounded => n,
+        };
+    }
+}
+
 pub fn derive_slice(input: &Input) -> TokenStream {
     let name = &input.name;
     let slice_name = names::slice_name(name);
@@ -10,6 +29,7 @@ pub fn derive_slice(input: &Input) -> TokenStream {
     let ptr_name = names::ptr_name(&input.name);
     let iter_name = names::iter_name(name);
 
+    let resolve_range = resolve_range();
     let generated = quote! {
         impl<'a> ::layout::SoASlice<#name> for #slice_name<'a> {
             type Ref<'t>  = #ref_name<'t> where Self: 't, 'a: 't;
@@ -30,17 +50,7 @@ pub fn derive_slice(input: &Input) -> TokenStream {
             }
 
             fn slice<'c, 'b: 'c>(&'c self, index: impl core::ops::RangeBounds<usize>) -> Self::Slice<'c> where Self: 'b {
-                let start = match index.start_bound() {
-                    core::ops::Bound::Included(i) => *i,
-                    core::ops::Bound::Excluded(i) => i.saturating_add(1),
-                    core::ops::Bound::Unbounded => 0,
-                };
-                let n = self.len();
-                let end = match index.end_bound() {
-                    core::ops::Bound::Included(i) => (*i).saturating_add(1),
-                    core::ops::Bound::Excluded(i) => *i,
-                    core::ops::Bound::Unbounded => n,
-                };
+                #resolve_range
                 self.index(start..end)
             }
 
@@ -76,6 +86,7 @@ pub fn derive_slice_mut(input: &Input) -> TokenStream {
     let iter_name = names::iter_name(name);
     let iter_mut_name = names::iter_mut_name(name);
 
+    let resolve_range = resolve_range();
     let generated = quote! {
 
         impl<'a> ::layout::SoASliceMut<#name> for #slice_mut_name<'a> {
@@ -106,17 +117,7 @@ pub fn derive_slice_mut(input: &Input) -> TokenStream {
 
             #[inline]
             fn slice<'c, 'b: 'c>(&'c self, index: impl core::ops::RangeBounds<usize>) -> Self::Slice<'c> where Self: 'b {
-                let start = match index.start_bound() {
-                    core::ops::Bound::Included(i) => *i,
-                    core::ops::Bound::Excluded(i) => i.saturating_add(1),
-                    core::ops::Bound::Unbounded => 0,
-                };
-                let n = self.len();
-                let end = match index.end_bound() {
-                    core::ops::Bound::Included(i) => (*i).saturating_add(1),
-                    core::ops::Bound::Excluded(i) => *i,
-                    core::ops::Bound::Unbounded => n,
-                };
+                #resolve_range
                 self.index(start..end)
             }
 
@@ -142,17 +143,7 @@ pub fn derive_slice_mut(input: &Input) -> TokenStream {
 
             #[inline]
             fn slice_mut<'c>(&'c mut self, index: impl core::ops::RangeBounds<usize>) -> Self::SliceMut<'c> {
-                let start = match index.start_bound() {
-                    core::ops::Bound::Included(i) => *i,
-                    core::ops::Bound::Excluded(i) => i.saturating_add(1),
-                    core::ops::Bound::Unbounded => 0,
-                };
-                let n = self.len();
-                let end = match index.end_bound() {
-                    core::ops::Bound::Included(i) => (*i).saturating_add(1),
-                    core::ops::Bound::Excluded(i) => *i,
-                    core::ops::Bound::Unbounded => n,
-                };
+                #resolve_range
                 self.index_mut(start..end)
             }
 
@@ -216,6 +207,7 @@ pub fn derive_vec(input: &Input) -> TokenStream {
     let iter_name = names::iter_name(name);
     let iter_mut_name = names::iter_mut_name(name);
 
+    let resolve_range = resolve_range();
     let generated = quote! {
 
         impl ::layout::SoAVec<#name> for #vec_name {
@@ -246,17 +238,7 @@ pub fn derive_vec(input: &Input) -> TokenStream {
 
             #[inline]
             fn slice<'c, 'a: 'c>(&'c self, index: impl core::ops::RangeBounds<usize>) -> Self::Slice<'c> where Self: 'a {
-                let start = match index.start_bound() {
-                    core::ops::Bound::Included(i) => *i,
-                    core::ops::Bound::Excluded(i) => i.saturating_add(1),
-                    core::ops::Bound::Unbounded => 0,
-                };
-                let n = self.len();
-                let end = match index.end_bound() {
-                    core::ops::Bound::Included(i) => (*i).saturating_add(1),
-                    core::ops::Bound::Excluded(i) => *i,
-                    core::ops::Bound::Unbounded => n,
-                };
+                #resolve_range
                 self.index(start..end)
             }
 
@@ -282,17 +264,7 @@ pub fn derive_vec(input: &Input) -> TokenStream {
 
             #[inline]
             fn slice_mut<'c>(&'c mut self, index: impl core::ops::RangeBounds<usize>) -> Self::SliceMut<'c> {
-                let start = match index.start_bound() {
-                    core::ops::Bound::Included(i) => *i,
-                    core::ops::Bound::Excluded(i) => i.saturating_add(1),
-                    core::ops::Bound::Unbounded => 0,
-                };
-                let n = self.len();
-                let end = match index.end_bound() {
-                    core::ops::Bound::Included(i) => (*i).saturating_add(1),
-                    core::ops::Bound::Excluded(i) => *i,
-                    core::ops::Bound::Unbounded => n,
-                };
+                #resolve_range
                 self.index_mut(start..end)
             }
 

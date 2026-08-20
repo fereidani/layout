@@ -29,6 +29,41 @@ use crate::bitpack::BitPack;
 /// Bit-packed backing store type backing a `T` compact column.
 type Store<T> = <T as CompactRepr>::Storage;
 
+/// Panic with `Vec`'s out-of-bounds message unless `index < len`.
+/// `#[track_caller]` keeps the reported location at the caller, as an inline
+/// `assert!` would.
+#[inline(always)]
+#[track_caller]
+fn assert_in_bounds(index: usize, len: usize) {
+    assert!(
+        index < len,
+        "index out of bounds: the len is {} but the index is {}",
+        len,
+        index
+    );
+}
+
+/// Resolve `range` against a column of `len` elements into a `start..end`
+/// pair, following `Vec`'s slice-index semantics. The caller still validates
+/// the pair against the column.
+fn resolve_range<R: core::ops::RangeBounds<usize>>(
+    range: R,
+    len: usize,
+) -> (usize, usize) {
+    use core::ops::Bound;
+    let start = match range.start_bound() {
+        Bound::Included(&i) => i,
+        Bound::Excluded(&i) => i + 1,
+        Bound::Unbounded => 0,
+    };
+    let end = match range.end_bound() {
+        Bound::Included(&i) => i + 1,
+        Bound::Excluded(&i) => i,
+        Bound::Unbounded => len,
+    };
+    (start, end)
+}
+
 /// Compact representation: how a `Copy` value is encoded into and decoded
 /// from a small unsigned integer, and which [`BitPack`] storage backs it.
 ///
@@ -499,12 +534,7 @@ impl<T: CompactRepr> CompactVec<T> {
     }
 
     pub fn remove(&mut self, index: usize) -> Compact<T> {
-        assert!(
-            index < self.len(),
-            "index out of bounds: the len is {} but the index is {}",
-            self.len(),
-            index
-        );
+        assert_in_bounds(index, self.len());
         // SAFETY: `index < self.len()` was asserted above.
         let val =
             unsafe { Compact(T::decode(self.inner.get_unchecked(index))) };
@@ -516,12 +546,7 @@ impl<T: CompactRepr> CompactVec<T> {
     }
 
     pub fn swap_remove(&mut self, index: usize) -> Compact<T> {
-        assert!(
-            index < self.len(),
-            "index out of bounds: the len is {} but the index is {}",
-            self.len(),
-            index
-        );
+        assert_in_bounds(index, self.len());
         // SAFETY: `index < self.len()` was asserted above.
         let val =
             unsafe { Compact(T::decode(self.inner.get_unchecked(index))) };
@@ -542,12 +567,7 @@ impl<T: CompactRepr> CompactVec<T> {
         element: impl Into<Compact<T>>,
     ) -> Compact<T> {
         let element = element.into();
-        assert!(
-            index < self.len(),
-            "index out of bounds: the len is {} but the index is {}",
-            self.len(),
-            index
-        );
+        assert_in_bounds(index, self.len());
         // SAFETY: `index < self.len()` was asserted above.
         unsafe {
             let old = Compact(T::decode(self.inner.get_unchecked(index)));
@@ -564,12 +584,7 @@ impl<T: CompactRepr> CompactVec<T> {
     #[inline]
     pub fn set(&mut self, index: usize, value: impl Into<Compact<T>>) {
         let value = value.into();
-        assert!(
-            index < self.len(),
-            "index out of bounds: the len is {} but the index is {}",
-            self.len(),
-            index
-        );
+        assert_in_bounds(index, self.len());
         // SAFETY: `index < self.len()` just asserted.
         unsafe { self.inner.set_unchecked(index, T::encode(value.0)) };
     }
@@ -628,12 +643,11 @@ impl<T: CompactRepr> CompactVec<T> {
     }
 
     pub fn as_slice(&self) -> CompactSlice<'_, T> {
-        CompactSlice {
-            packed: &self.inner as *const Store<T>,
-            start: 0,
-            len: self.inner.len(),
-            _marker: PhantomData,
-        }
+        CompactSlice::from_parts(
+            &self.inner as *const Store<T>,
+            0,
+            self.inner.len(),
+        )
     }
 
     pub fn as_mut_slice(&mut self) -> CompactSliceMut<'_, T> {
@@ -668,22 +682,20 @@ impl<T: CompactRepr> CompactVec<T> {
 
     pub fn slice(&self, range: Range<usize>) -> CompactSlice<'_, T> {
         assert!(range.start <= range.end && range.end <= self.len());
-        CompactSlice {
-            packed: &self.inner as *const Store<T>,
-            start: range.start,
-            len: range.end - range.start,
-            _marker: PhantomData,
-        }
+        CompactSlice::from_parts(
+            &self.inner as *const Store<T>,
+            range.start,
+            range.end - range.start,
+        )
     }
 
     pub fn slice_mut(&mut self, range: Range<usize>) -> CompactSliceMut<'_, T> {
         assert!(range.start <= range.end && range.end <= self.len());
-        CompactSliceMut {
-            packed: &mut self.inner as *mut Store<T>,
-            start: range.start,
-            len: range.end - range.start,
-            _marker: PhantomData,
-        }
+        CompactSliceMut::from_parts(
+            &mut self.inner as *mut Store<T>,
+            range.start,
+            range.end - range.start,
+        )
     }
 
     pub fn get(&self, index: usize) -> Option<Compact<T>> {
@@ -753,16 +765,7 @@ impl<T: CompactRepr> CompactVec<T> {
         &mut self,
         range: R,
     ) -> CompactDrain<'_, T> {
-        let start = match range.start_bound() {
-            core::ops::Bound::Included(&i) => i,
-            core::ops::Bound::Excluded(&i) => i + 1,
-            core::ops::Bound::Unbounded => 0,
-        };
-        let end = match range.end_bound() {
-            core::ops::Bound::Included(&i) => i + 1,
-            core::ops::Bound::Excluded(&i) => i,
-            core::ops::Bound::Unbounded => self.inner.len(),
-        };
+        let (start, end) = resolve_range(range, self.inner.len());
         assert!(start <= end && end <= self.inner.len());
         let old_len = self.inner.len();
         // Leak safety (mirrors `Vec::drain`): shorten to `start` up front
@@ -796,16 +799,7 @@ impl<T: CompactRepr> CompactVec<T> {
         R: core::ops::RangeBounds<usize>,
         I: core::iter::IntoIterator<Item = Compact<T>>,
     {
-        let start = match range.start_bound() {
-            core::ops::Bound::Included(&i) => i,
-            core::ops::Bound::Excluded(&i) => i + 1,
-            core::ops::Bound::Unbounded => 0,
-        };
-        let end = match range.end_bound() {
-            core::ops::Bound::Included(&i) => i + 1,
-            core::ops::Bound::Excluded(&i) => i,
-            core::ops::Bound::Unbounded => self.inner.len(),
-        };
+        let (start, end) = resolve_range(range, self.inner.len());
         assert!(
             start <= end && end <= self.inner.len(),
             "splice range out of bounds: the len is {} but the range is {}..{}",
@@ -1004,17 +998,30 @@ impl<'a, T: CompactRepr> Default for CompactSlice<'a, T> {
         // Empty slice: `len == 0` guarantees the dangling storage is never
         // dereferenced. A dangling raw pointer (not a reference) is sound and
         // allocation-free.
-        CompactSlice {
-            packed: core::ptr::NonNull::<Store<T>>::dangling().as_ptr(),
-            start: 0,
-            len: 0,
-            _marker: PhantomData,
-        }
+        CompactSlice::from_parts(
+            core::ptr::NonNull::<Store<T>>::dangling().as_ptr(),
+            0,
+            0,
+        )
     }
 }
 
 #[allow(dead_code)]
 impl<'a, T: CompactRepr> CompactSlice<'a, T> {
+    /// Build a view of `len` lanes starting at absolute lane `start` of
+    /// `packed`. Every constructor in this module funnels through here; the
+    /// caller guarantees the range is backed by live storage whenever
+    /// `len > 0`.
+    #[inline(always)]
+    fn from_parts(packed: *const Store<T>, start: usize, len: usize) -> Self {
+        CompactSlice {
+            packed,
+            start,
+            len,
+            _marker: PhantomData,
+        }
+    }
+
     #[inline]
     pub fn len(&self) -> usize {
         self.len
@@ -1064,12 +1071,7 @@ impl<'a, T: CompactRepr> CompactSlice<'a, T> {
         Some((
             // SAFETY: `0 < self.len`.
             unsafe { self.read(0) },
-            CompactSlice {
-                packed: self.packed,
-                start: self.start + 1,
-                len: self.len - 1,
-                _marker: PhantomData,
-            },
+            CompactSlice::from_parts(self.packed, self.start + 1, self.len - 1),
         ))
     }
 
@@ -1080,12 +1082,7 @@ impl<'a, T: CompactRepr> CompactSlice<'a, T> {
         Some((
             // SAFETY: `self.len - 1 < self.len`.
             unsafe { self.read(self.len - 1) },
-            CompactSlice {
-                packed: self.packed,
-                start: self.start,
-                len: self.len - 1,
-                _marker: PhantomData,
-            },
+            CompactSlice::from_parts(self.packed, self.start, self.len - 1),
         ))
     }
 
@@ -1095,18 +1092,12 @@ impl<'a, T: CompactRepr> CompactSlice<'a, T> {
     ) -> (CompactSlice<'a, T>, CompactSlice<'a, T>) {
         assert!(mid <= self.len);
         (
-            CompactSlice {
-                packed: self.packed,
-                start: self.start,
-                len: mid,
-                _marker: PhantomData,
-            },
-            CompactSlice {
-                packed: self.packed,
-                start: self.start + mid,
-                len: self.len - mid,
-                _marker: PhantomData,
-            },
+            CompactSlice::from_parts(self.packed, self.start, mid),
+            CompactSlice::from_parts(
+                self.packed,
+                self.start + mid,
+                self.len - mid,
+            ),
         )
     }
 
@@ -1145,12 +1136,7 @@ impl<'a, T: CompactRepr> CompactSlice<'a, T> {
     }
 
     pub fn index(&self, index: usize) -> Compact<T> {
-        assert!(
-            index < self.len,
-            "index out of bounds: the len is {} but the index is {}",
-            self.len,
-            index
-        );
+        assert_in_bounds(index, self.len);
         // SAFETY: `index < self.len` just asserted.
         unsafe { self.read(index) }
     }
@@ -1164,12 +1150,11 @@ impl<'a, T: CompactRepr> CompactSlice<'a, T> {
 
     pub fn slice(&self, range: Range<usize>) -> CompactSlice<'a, T> {
         assert!(range.start <= range.end && range.end <= self.len);
-        CompactSlice {
-            packed: self.packed,
-            start: self.start + range.start,
-            len: range.end - range.start,
-            _marker: PhantomData,
-        }
+        CompactSlice::from_parts(
+            self.packed,
+            self.start + range.start,
+            range.end - range.start,
+        )
     }
 
     pub fn as_ptr(&self) -> CompactPtr<T> {
@@ -1330,17 +1315,27 @@ pub struct CompactSliceMut<'a, T: CompactRepr> {
 
 impl<'a, T: CompactRepr> Default for CompactSliceMut<'a, T> {
     fn default() -> Self {
-        CompactSliceMut {
-            packed: core::ptr::NonNull::<Store<T>>::dangling().as_ptr(),
-            start: 0,
-            len: 0,
-            _marker: PhantomData,
-        }
+        CompactSliceMut::from_parts(
+            core::ptr::NonNull::<Store<T>>::dangling().as_ptr(),
+            0,
+            0,
+        )
     }
 }
 
 #[allow(dead_code)]
 impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
+    /// Mutable counterpart of [`CompactSlice::from_parts`].
+    #[inline(always)]
+    fn from_parts(packed: *mut Store<T>, start: usize, len: usize) -> Self {
+        CompactSliceMut {
+            packed,
+            start,
+            len,
+            _marker: PhantomData,
+        }
+    }
+
     #[inline]
     pub fn len(&self) -> usize {
         self.len
@@ -1352,12 +1347,11 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
     }
 
     pub fn as_ref(&self) -> CompactSlice<'_, T> {
-        CompactSlice {
-            packed: self.packed as *const Store<T>,
-            start: self.start,
-            len: self.len,
-            _marker: PhantomData,
-        }
+        CompactSlice::from_parts(
+            self.packed as *const Store<T>,
+            self.start,
+            self.len,
+        )
     }
 
     pub fn as_slice(&self) -> CompactSlice<'_, T> {
@@ -1408,12 +1402,11 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
         unsafe {
             Some((
                 CompactRefMut::from_packed_ptr(self.packed, self.start),
-                CompactSliceMut {
-                    packed: self.packed,
-                    start: self.start + 1,
-                    len: self.len - 1,
-                    _marker: PhantomData,
-                },
+                CompactSliceMut::from_parts(
+                    self.packed,
+                    self.start + 1,
+                    self.len - 1,
+                ),
             ))
         }
     }
@@ -1430,12 +1423,11 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
                     self.packed,
                     self.start + self.len - 1,
                 ),
-                CompactSliceMut {
-                    packed: self.packed,
-                    start: self.start,
-                    len: self.len - 1,
-                    _marker: PhantomData,
-                },
+                CompactSliceMut::from_parts(
+                    self.packed,
+                    self.start,
+                    self.len - 1,
+                ),
             ))
         }
     }
@@ -1446,18 +1438,12 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
     ) -> (CompactSliceMut<'a, T>, CompactSliceMut<'a, T>) {
         assert!(mid <= self.len);
         (
-            CompactSliceMut {
-                packed: self.packed,
-                start: self.start,
-                len: mid,
-                _marker: PhantomData,
-            },
-            CompactSliceMut {
-                packed: self.packed,
-                start: self.start + mid,
-                len: self.len - mid,
-                _marker: PhantomData,
-            },
+            CompactSliceMut::from_parts(self.packed, self.start, mid),
+            CompactSliceMut::from_parts(
+                self.packed,
+                self.start + mid,
+                self.len - mid,
+            ),
         )
     }
 
@@ -1499,12 +1485,7 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
     }
 
     pub fn index(&self, index: usize) -> Compact<T> {
-        assert!(
-            index < self.len,
-            "index out of bounds: the len is {} but the index is {}",
-            self.len,
-            index
-        );
+        assert_in_bounds(index, self.len);
         unsafe { self.read(index) }
     }
 
@@ -1537,12 +1518,7 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
     }
 
     pub fn index_mut(&mut self, index: usize) -> CompactRefMut<'_, T> {
-        assert!(
-            index < self.len,
-            "index out of bounds: the len is {} but the index is {}",
-            self.len,
-            index
-        );
+        assert_in_bounds(index, self.len);
         unsafe {
             CompactRefMut::from_packed_ptr(self.packed, self.start + index)
         }
@@ -1552,22 +1528,16 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
     where
         'a: 'b,
     {
-        CompactSliceMut {
-            packed: self.packed,
-            start: self.start,
-            len: self.len,
-            _marker: PhantomData,
-        }
+        CompactSliceMut::from_parts(self.packed, self.start, self.len)
     }
 
     pub fn slice(&self, range: Range<usize>) -> CompactSlice<'_, T> {
         assert!(range.start <= range.end && range.end <= self.len);
-        CompactSlice {
-            packed: self.packed as *const Store<T>,
-            start: self.start + range.start,
-            len: range.end - range.start,
-            _marker: PhantomData,
-        }
+        CompactSlice::from_parts(
+            self.packed as *const Store<T>,
+            self.start + range.start,
+            range.end - range.start,
+        )
     }
 
     pub fn as_ptr(&self) -> CompactPtr<T> {
@@ -1901,80 +1871,140 @@ pub struct CompactPtrMut<T: CompactRepr> {
 // Pointer-like: Debug/PartialEq/Eq/Hash over (packed address, index), matching
 // raw pointers (no `T` bound needed). This lets `#[layout(Debug/PartialEq/Eq/
 // Hash)]` derive on the generated Ptr/PtrMut types compile for compact columns.
-impl<T: CompactRepr> core::fmt::Debug for CompactPtr<T> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("CompactPtr")
-            .field("packed", &self.packed)
-            .field("index", &self.index)
-            .finish()
-    }
+macro_rules! pointer_like_traits {
+    ($ptr:ident) => {
+        impl<T: CompactRepr> core::fmt::Debug for $ptr<T> {
+            fn fmt(
+                &self,
+                f: &mut core::fmt::Formatter<'_>,
+            ) -> core::fmt::Result {
+                f.debug_struct(stringify!($ptr))
+                    .field("packed", &self.packed)
+                    .field("index", &self.index)
+                    .finish()
+            }
+        }
+
+        impl<T: CompactRepr> PartialEq for $ptr<T> {
+            fn eq(&self, other: &Self) -> bool {
+                self.packed == other.packed && self.index == other.index
+            }
+        }
+
+        impl<T: CompactRepr> Eq for $ptr<T> {}
+
+        impl<T: CompactRepr> core::hash::Hash for $ptr<T> {
+            fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+                self.packed.hash(state);
+                self.index.hash(state);
+            }
+        }
+    };
 }
 
-impl<T: CompactRepr> PartialEq for CompactPtr<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.packed == other.packed && self.index == other.index
-    }
+pointer_like_traits!(CompactPtr);
+pointer_like_traits!(CompactPtrMut);
+
+/// The read-only surface both compact pointers share: null test, deref,
+/// element-wise arithmetic and `read`. Both modes (storage-backed and the
+/// `DIRECT_INDEX` sentinel) behave identically through a `*const` and a
+/// `*mut Store<T>`, so the bodies are written once.
+macro_rules! compact_ptr_reads {
+    ($ptr:ident) => {
+        #[allow(dead_code)]
+        impl<T: CompactRepr> $ptr<T> {
+            pub fn is_null(self) -> bool {
+                self.packed.is_null()
+            }
+
+            /// Returns the element the pointer references, or `None` if it is
+            /// null.
+            ///
+            /// # Safety
+            ///
+            /// If non-null, `self.packed` must point to valid `Store<T>`
+            /// storage (or, for a direct pointer, to a live `T`) and
+            /// `self.index` must address an initialized element within it.
+            /// The caller must ensure the backing storage remains live while
+            /// the returned value is used.
+            pub unsafe fn as_ref(self) -> Option<Compact<T>> {
+                if self.is_null() {
+                    None
+                } else {
+                    // SAFETY: forwarded contract.
+                    Some(unsafe { self.read() })
+                }
+            }
+
+            /// Produces a pointer offset by `count` elements (analogous to
+            /// [`pointer::offset`](core::pointer::offset)).
+            ///
+            /// # Safety
+            ///
+            /// The resulting index (`self.index + count`) must be in bounds
+            /// or one past the end of the same allocated backing storage.
+            pub unsafe fn offset(self, count: isize) -> $ptr<T> {
+                $ptr {
+                    packed: self.packed,
+                    index: (self.index as isize + count) as usize,
+                }
+            }
+
+            /// Produces a pointer advanced by `count` elements (analogous to
+            /// [`pointer::add`](core::pointer::add)).
+            ///
+            /// # Safety
+            ///
+            /// The resulting index (`self.index + count`) must be in bounds
+            /// or one past the end of the same allocated backing storage.
+            pub unsafe fn add(self, count: usize) -> $ptr<T> {
+                $ptr {
+                    packed: self.packed,
+                    index: self.index + count,
+                }
+            }
+
+            /// Produces a pointer moved back by `count` elements (analogous
+            /// to [`pointer::sub`](core::pointer::sub)).
+            ///
+            /// # Safety
+            ///
+            /// `count` must not exceed `self.index`; the resulting index must
+            /// be in bounds of the same allocated backing storage.
+            pub unsafe fn sub(self, count: usize) -> $ptr<T> {
+                $ptr {
+                    packed: self.packed,
+                    index: self.index - count,
+                }
+            }
+
+            /// Reads the element the pointer references (analogous to
+            /// [`pointer::read`](core::pointer::read)).
+            ///
+            /// # Safety
+            ///
+            /// `self.packed` must point to valid `Store<T>` storage (or, for
+            /// a direct pointer, to a live `T`) and `self.index` must address
+            /// an initialized element within it.
+            pub unsafe fn read(self) -> Compact<T> {
+                if self.index == DIRECT_INDEX {
+                    // SAFETY: a direct pointer disguises a live `T`.
+                    Compact(*self.packed.cast::<T>())
+                } else {
+                    // SAFETY: the caller guarantees `index` addresses an
+                    // initialized element of the live storage.
+                    Compact(T::decode((*self.packed).get_unchecked(self.index)))
+                }
+            }
+        }
+    };
 }
 
-impl<T: CompactRepr> Eq for CompactPtr<T> {}
-
-impl<T: CompactRepr> core::hash::Hash for CompactPtr<T> {
-    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        self.packed.hash(state);
-        self.index.hash(state);
-    }
-}
-
-impl<T: CompactRepr> core::fmt::Debug for CompactPtrMut<T> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("CompactPtrMut")
-            .field("packed", &self.packed)
-            .field("index", &self.index)
-            .finish()
-    }
-}
-
-impl<T: CompactRepr> PartialEq for CompactPtrMut<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.packed == other.packed && self.index == other.index
-    }
-}
-
-impl<T: CompactRepr> Eq for CompactPtrMut<T> {}
-
-impl<T: CompactRepr> core::hash::Hash for CompactPtrMut<T> {
-    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        self.packed.hash(state);
-        self.index.hash(state);
-    }
-}
+compact_ptr_reads!(CompactPtr);
+compact_ptr_reads!(CompactPtrMut);
 
 #[allow(dead_code)]
 impl<T: CompactRepr> CompactPtr<T> {
-    pub fn is_null(self) -> bool {
-        self.packed.is_null()
-    }
-
-    /// Returns the element the pointer references, or `None` if it is null.
-    ///
-    /// # Safety
-    ///
-    /// If non-null, `self.packed` must point to valid `Store<T>` storage
-    /// (or, for a direct pointer, to a live `T`) and `self.index` must
-    /// address an initialized element within it. The caller must ensure the
-    /// backing storage remains live while the returned value is used.
-    pub unsafe fn as_ref(self) -> Option<Compact<T>> {
-        if self.is_null() {
-            None
-        } else if self.index == DIRECT_INDEX {
-            Some(Compact(*self.packed.cast::<T>()))
-        } else {
-            // SAFETY: the caller guarantees `index` addresses an initialized
-            // element of the live storage.
-            Some(Compact(T::decode((*self.packed).get_unchecked(self.index))))
-        }
-    }
-
     /// Direct pointers convert to a null mutable pointer: they borrow a
     /// standalone value immutably, so there is no storage a write could
     /// legally target.
@@ -1991,93 +2021,10 @@ impl<T: CompactRepr> CompactPtr<T> {
             }
         }
     }
-
-    /// Produces a pointer offset by `count` elements (analogous to
-    /// [`pointer::offset`](core::pointer::offset)).
-    ///
-    /// # Safety
-    ///
-    /// The resulting index (`self.index + count`) must be in bounds or one
-    /// past the end of the same allocated backing storage.
-    pub unsafe fn offset(self, count: isize) -> CompactPtr<T> {
-        CompactPtr {
-            packed: self.packed,
-            index: (self.index as isize + count) as usize,
-        }
-    }
-
-    /// Produces a pointer advanced by `count` elements (analogous to
-    /// [`pointer::add`](core::pointer::add)).
-    ///
-    /// # Safety
-    ///
-    /// The resulting index (`self.index + count`) must be in bounds or one
-    /// past the end of the same allocated backing storage.
-    pub unsafe fn add(self, count: usize) -> CompactPtr<T> {
-        CompactPtr {
-            packed: self.packed,
-            index: self.index + count,
-        }
-    }
-
-    /// Produces a pointer moved back by `count` elements (analogous to
-    /// [`pointer::sub`](core::pointer::sub)).
-    ///
-    /// # Safety
-    ///
-    /// `count` must not exceed `self.index`; the resulting index must be in
-    /// bounds of the same allocated backing storage.
-    pub unsafe fn sub(self, count: usize) -> CompactPtr<T> {
-        CompactPtr {
-            packed: self.packed,
-            index: self.index - count,
-        }
-    }
-
-    /// Reads the element the pointer references (analogous to
-    /// [`pointer::read`](core::pointer::read)).
-    ///
-    /// # Safety
-    ///
-    /// `self.packed` must point to valid `Store<T>` storage (or, for a
-    /// direct pointer, to a live `T`) and `self.index` must address an
-    /// initialized element within it.
-    pub unsafe fn read(self) -> Compact<T> {
-        if self.index == DIRECT_INDEX {
-            Compact(*self.packed.cast::<T>())
-        } else {
-            // SAFETY: the caller guarantees `index` addresses an initialized
-            // element of the live storage.
-            Compact(T::decode((*self.packed).get_unchecked(self.index)))
-        }
-    }
 }
 
 #[allow(dead_code)]
 impl<T: CompactRepr> CompactPtrMut<T> {
-    pub fn is_null(self) -> bool {
-        self.packed.is_null()
-    }
-
-    /// Returns the element the pointer references, or `None` if it is null.
-    ///
-    /// # Safety
-    ///
-    /// If non-null, `self.packed` must point to valid `Store<T>` storage and
-    /// `self.index` must address an initialized element within it.
-    pub unsafe fn as_ref(self) -> Option<Compact<T>> {
-        if self.is_null() {
-            None
-        } else if self.index == DIRECT_INDEX {
-            // SAFETY: a direct pointer disguises a live `*mut T`.
-            Some(Compact(*self.packed.cast::<T>()))
-        } else {
-            // SAFETY: the caller guarantees `index` addresses an initialized
-            // element of the live storage.
-            Some(Compact(T::decode((*self.packed).get_unchecked(self.index))))
-        }
-    }
-
     /// Returns a mutable reference to the element the pointer references, or
     /// `None` if it is null.
     ///
@@ -2100,66 +2047,6 @@ impl<T: CompactRepr> CompactPtrMut<T> {
         CompactPtr {
             packed: self.packed,
             index: self.index,
-        }
-    }
-
-    /// Produces a pointer offset by `count` elements (analogous to
-    /// [`pointer::offset`](core::pointer::offset)).
-    ///
-    /// # Safety
-    ///
-    /// The resulting index (`self.index + count`) must be in bounds or one
-    /// past the end of the same allocated backing storage.
-    pub unsafe fn offset(self, count: isize) -> CompactPtrMut<T> {
-        CompactPtrMut {
-            packed: self.packed,
-            index: (self.index as isize + count) as usize,
-        }
-    }
-
-    /// Produces a pointer advanced by `count` elements (analogous to
-    /// [`pointer::add`](core::pointer::add)).
-    ///
-    /// # Safety
-    ///
-    /// The resulting index (`self.index + count`) must be in bounds or one
-    /// past the end of the same allocated backing storage.
-    pub unsafe fn add(self, count: usize) -> CompactPtrMut<T> {
-        CompactPtrMut {
-            packed: self.packed,
-            index: self.index + count,
-        }
-    }
-
-    /// Produces a pointer moved back by `count` elements (analogous to
-    /// [`pointer::sub`](core::pointer::sub)).
-    ///
-    /// # Safety
-    ///
-    /// `count` must not exceed `self.index`; the resulting index must be in
-    /// bounds of the same allocated backing storage.
-    pub unsafe fn sub(self, count: usize) -> CompactPtrMut<T> {
-        CompactPtrMut {
-            packed: self.packed,
-            index: self.index - count,
-        }
-    }
-
-    /// Reads the element the pointer references (analogous to
-    /// [`pointer::read`](core::pointer::read)).
-    ///
-    /// # Safety
-    ///
-    /// `self.packed` must point to valid `Store<T>` storage and `self.index`
-    /// must address an initialized element within it.
-    pub unsafe fn read(self) -> Compact<T> {
-        if self.index == DIRECT_INDEX {
-            // SAFETY: a direct pointer disguises a live `*mut T`.
-            Compact(*self.packed.cast::<T>())
-        } else {
-            // SAFETY: the caller guarantees `index` addresses an initialized
-            // element of the live storage.
-            Compact(T::decode((*self.packed).get_unchecked(self.index)))
         }
     }
 
@@ -2519,12 +2406,11 @@ impl<'a, T: CompactRepr> Iterator for CompactChunks<'a, T> {
             return None;
         }
         let end = (self.pos + self.chunk_size).min(self.slice.len);
-        let result = CompactSlice {
-            packed: self.slice.packed,
-            start: self.slice.start + self.pos,
-            len: end - self.pos,
-            _marker: PhantomData,
-        };
+        let result = CompactSlice::from_parts(
+            self.slice.packed,
+            self.slice.start + self.pos,
+            end - self.pos,
+        );
         self.pos = end;
         Some(result)
     }
@@ -2561,12 +2447,11 @@ impl<'a, T: CompactRepr> Iterator for CompactChunksExact<'a, T> {
         if self.pos >= self.end || self.chunk_size == 0 {
             return None;
         }
-        let result = CompactSlice {
-            packed: self.slice.packed,
-            start: self.slice.start + self.pos,
-            len: self.chunk_size,
-            _marker: PhantomData,
-        };
+        let result = CompactSlice::from_parts(
+            self.slice.packed,
+            self.slice.start + self.pos,
+            self.chunk_size,
+        );
         self.pos += self.chunk_size;
         Some(result)
     }
@@ -2591,12 +2476,11 @@ impl<T: CompactRepr> ExactSizeIterator for CompactChunksExact<'_, T> {}
 impl<'a, T: CompactRepr> CompactChunksExact<'a, T> {
     pub fn remainder(&self) -> CompactSlice<'a, T> {
         let rem_start = self.end.min(self.slice.len);
-        CompactSlice {
-            packed: self.slice.packed,
-            start: self.slice.start + rem_start,
-            len: self.slice.len - rem_start,
-            _marker: PhantomData,
-        }
+        CompactSlice::from_parts(
+            self.slice.packed,
+            self.slice.start + rem_start,
+            self.slice.len - rem_start,
+        )
     }
 }
 
@@ -2617,12 +2501,11 @@ impl<'a, T: CompactRepr> Iterator for CompactChunksMut<'a, T> {
             return None;
         }
         let end = (self.pos + self.chunk_size).min(self.len);
-        let result = CompactSliceMut {
-            packed: self.packed,
-            start: self.start + self.pos,
-            len: end - self.pos,
-            _marker: PhantomData,
-        };
+        let result = CompactSliceMut::from_parts(
+            self.packed,
+            self.start + self.pos,
+            end - self.pos,
+        );
         self.pos = end;
         Some(result)
     }
@@ -2661,12 +2544,11 @@ impl<'a, T: CompactRepr> Iterator for CompactChunksExactMut<'a, T> {
         if self.pos >= self.end || self.chunk_size == 0 {
             return None;
         }
-        let result = CompactSliceMut {
-            packed: self.packed,
-            start: self.start + self.pos,
-            len: self.chunk_size,
-            _marker: PhantomData,
-        };
+        let result = CompactSliceMut::from_parts(
+            self.packed,
+            self.start + self.pos,
+            self.chunk_size,
+        );
         self.pos += self.chunk_size;
         Some(result)
     }
@@ -2691,12 +2573,11 @@ impl<T: CompactRepr> ExactSizeIterator for CompactChunksExactMut<'_, T> {}
 impl<'a, T: CompactRepr> CompactChunksExactMut<'a, T> {
     pub fn into_remainder(self) -> CompactSliceMut<'a, T> {
         let rem_start = self.end.min(self.len);
-        CompactSliceMut {
-            packed: self.packed,
-            start: self.start + rem_start,
-            len: self.len - rem_start,
-            _marker: PhantomData,
-        }
+        CompactSliceMut::from_parts(
+            self.packed,
+            self.start + rem_start,
+            self.len - rem_start,
+        )
     }
 }
 
@@ -2761,12 +2642,11 @@ impl<'a, T: CompactRepr> crate::SoAIndex<CompactSlice<'a, T>>
     #[inline]
     fn get(self, slice: CompactSlice<'a, T>) -> Option<Self::RefOutput> {
         if self.start <= self.end && self.end <= slice.len {
-            Some(CompactSlice {
-                packed: slice.packed,
-                start: slice.start + self.start,
-                len: self.end - self.start,
-                _marker: PhantomData,
-            })
+            Some(CompactSlice::from_parts(
+                slice.packed,
+                slice.start + self.start,
+                self.end - self.start,
+            ))
         } else {
             None
         }
@@ -2776,22 +2656,20 @@ impl<'a, T: CompactRepr> crate::SoAIndex<CompactSlice<'a, T>>
         self,
         slice: CompactSlice<'a, T>,
     ) -> Self::RefOutput {
-        CompactSlice {
-            packed: slice.packed,
-            start: slice.start + self.start,
-            len: self.end - self.start,
-            _marker: PhantomData,
-        }
+        CompactSlice::from_parts(
+            slice.packed,
+            slice.start + self.start,
+            self.end - self.start,
+        )
     }
     #[inline]
     fn index(self, slice: CompactSlice<'a, T>) -> Self::RefOutput {
         assert!(self.start <= self.end && self.end <= slice.len);
-        CompactSlice {
-            packed: slice.packed,
-            start: slice.start + self.start,
-            len: self.end - self.start,
-            _marker: PhantomData,
-        }
+        CompactSlice::from_parts(
+            slice.packed,
+            slice.start + self.start,
+            self.end - self.start,
+        )
     }
 }
 
@@ -2802,12 +2680,11 @@ impl<'a, T: CompactRepr> crate::SoAIndexMut<CompactSliceMut<'a, T>>
     #[inline]
     fn get_mut(self, slice: CompactSliceMut<'a, T>) -> Option<Self::MutOutput> {
         if self.start <= self.end && self.end <= slice.len {
-            Some(CompactSliceMut {
-                packed: slice.packed,
-                start: slice.start + self.start,
-                len: self.end - self.start,
-                _marker: PhantomData,
-            })
+            Some(CompactSliceMut::from_parts(
+                slice.packed,
+                slice.start + self.start,
+                self.end - self.start,
+            ))
         } else {
             None
         }
@@ -2817,143 +2694,22 @@ impl<'a, T: CompactRepr> crate::SoAIndexMut<CompactSliceMut<'a, T>>
         self,
         slice: CompactSliceMut<'a, T>,
     ) -> Self::MutOutput {
-        CompactSliceMut {
-            packed: slice.packed,
-            start: slice.start + self.start,
-            len: self.end - self.start,
-            _marker: PhantomData,
-        }
+        CompactSliceMut::from_parts(
+            slice.packed,
+            slice.start + self.start,
+            self.end - self.start,
+        )
     }
     #[inline]
     fn index_mut(self, slice: CompactSliceMut<'a, T>) -> Self::MutOutput {
         assert!(self.start <= self.end && self.end <= slice.len);
-        CompactSliceMut {
-            packed: slice.packed,
-            start: slice.start + self.start,
-            len: self.end - self.start,
-            _marker: PhantomData,
-        }
+        CompactSliceMut::from_parts(
+            slice.packed,
+            slice.start + self.start,
+            self.end - self.start,
+        )
     }
 }
-
-impl<'a, T: CompactRepr> crate::SoAIndex<CompactSlice<'a, T>>
-    for core::ops::RangeTo<usize>
-{
-    type RefOutput = CompactSlice<'a, T>;
-    #[inline]
-    fn get(self, s: CompactSlice<'a, T>) -> Option<Self::RefOutput> {
-        crate::SoAIndex::get(0..self.end, s)
-    }
-    #[inline]
-    unsafe fn get_unchecked(self, s: CompactSlice<'a, T>) -> Self::RefOutput {
-        crate::SoAIndex::get_unchecked(0..self.end, s)
-    }
-    #[inline]
-    fn index(self, s: CompactSlice<'a, T>) -> Self::RefOutput {
-        crate::SoAIndex::index(0..self.end, s)
-    }
-}
-
-impl<'a, T: CompactRepr> crate::SoAIndexMut<CompactSliceMut<'a, T>>
-    for core::ops::RangeTo<usize>
-{
-    type MutOutput = CompactSliceMut<'a, T>;
-    #[inline]
-    fn get_mut(self, s: CompactSliceMut<'a, T>) -> Option<Self::MutOutput> {
-        crate::SoAIndexMut::get_mut(0..self.end, s)
-    }
-    #[inline]
-    unsafe fn get_unchecked_mut(
-        self,
-        s: CompactSliceMut<'a, T>,
-    ) -> Self::MutOutput {
-        crate::SoAIndexMut::get_unchecked_mut(0..self.end, s)
-    }
-    #[inline]
-    fn index_mut(self, s: CompactSliceMut<'a, T>) -> Self::MutOutput {
-        crate::SoAIndexMut::index_mut(0..self.end, s)
-    }
-}
-
-impl<'a, T: CompactRepr> crate::SoAIndex<CompactSlice<'a, T>>
-    for core::ops::RangeFrom<usize>
-{
-    type RefOutput = CompactSlice<'a, T>;
-    #[inline]
-    fn get(self, s: CompactSlice<'a, T>) -> Option<Self::RefOutput> {
-        if self.start <= s.len {
-            Some(CompactSlice {
-                packed: s.packed,
-                start: s.start + self.start,
-                len: s.len - self.start,
-                _marker: PhantomData,
-            })
-        } else {
-            None
-        }
-    }
-    #[inline]
-    unsafe fn get_unchecked(self, s: CompactSlice<'a, T>) -> Self::RefOutput {
-        CompactSlice {
-            packed: s.packed,
-            start: s.start + self.start,
-            len: s.len - self.start,
-            _marker: PhantomData,
-        }
-    }
-    #[inline]
-    fn index(self, s: CompactSlice<'a, T>) -> Self::RefOutput {
-        assert!(self.start <= s.len);
-        CompactSlice {
-            packed: s.packed,
-            start: s.start + self.start,
-            len: s.len - self.start,
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<'a, T: CompactRepr> crate::SoAIndexMut<CompactSliceMut<'a, T>>
-    for core::ops::RangeFrom<usize>
-{
-    type MutOutput = CompactSliceMut<'a, T>;
-    #[inline]
-    fn get_mut(self, s: CompactSliceMut<'a, T>) -> Option<Self::MutOutput> {
-        if self.start <= s.len {
-            Some(CompactSliceMut {
-                packed: s.packed,
-                start: s.start + self.start,
-                len: s.len - self.start,
-                _marker: PhantomData,
-            })
-        } else {
-            None
-        }
-    }
-    #[inline]
-    unsafe fn get_unchecked_mut(
-        self,
-        s: CompactSliceMut<'a, T>,
-    ) -> Self::MutOutput {
-        CompactSliceMut {
-            packed: s.packed,
-            start: s.start + self.start,
-            len: s.len - self.start,
-            _marker: PhantomData,
-        }
-    }
-    #[inline]
-    fn index_mut(self, s: CompactSliceMut<'a, T>) -> Self::MutOutput {
-        assert!(self.start <= s.len);
-        CompactSliceMut {
-            packed: s.packed,
-            start: s.start + self.start,
-            len: s.len - self.start,
-            _marker: PhantomData,
-        }
-    }
-}
-
 impl<'a, T: CompactRepr> crate::SoAIndex<CompactSlice<'a, T>>
     for core::ops::RangeFull
 {
@@ -2993,108 +2749,90 @@ impl<'a, T: CompactRepr> crate::SoAIndexMut<CompactSliceMut<'a, T>>
     }
 }
 
-impl<'a, T: CompactRepr> crate::SoAIndex<CompactSlice<'a, T>>
-    for core::ops::RangeInclusive<usize>
-{
-    type RefOutput = CompactSlice<'a, T>;
-    #[inline]
-    fn get(self, s: CompactSlice<'a, T>) -> Option<Self::RefOutput> {
-        if *self.end() == usize::MAX {
-            None
-        } else {
-            crate::SoAIndex::get(*self.start()..self.end().saturating_add(1), s)
+// The remaining range families do no work of their own: each normalizes to
+// the equivalent `Range<usize>` (already implemented above) and forwards.
+// `forward_range_index!` writes that pair out; `none_if` marks the inputs
+// with no exclusive-end equivalent, which resolve to `None` instead.
+macro_rules! forward_range_index {
+    (
+        $index:ty, |$idx:ident, $s:ident| $range:expr
+        $(, none_if $cond:expr)?
+    ) => {
+        impl<'a, T: CompactRepr> crate::SoAIndex<CompactSlice<'a, T>>
+            for $index
+        {
+            type RefOutput = CompactSlice<'a, T>;
+            #[inline]
+            fn get(self, $s: CompactSlice<'a, T>) -> Option<Self::RefOutput> {
+                let $idx = self;
+                $( if $cond {
+                    return None;
+                } )?
+                crate::SoAIndex::get($range, $s)
+            }
+            #[inline]
+            unsafe fn get_unchecked(
+                self,
+                $s: CompactSlice<'a, T>,
+            ) -> Self::RefOutput {
+                let $idx = self;
+                crate::SoAIndex::get_unchecked($range, $s)
+            }
+            #[inline]
+            fn index(self, $s: CompactSlice<'a, T>) -> Self::RefOutput {
+                let $idx = self;
+                crate::SoAIndex::index($range, $s)
+            }
         }
-    }
-    #[inline]
-    unsafe fn get_unchecked(self, s: CompactSlice<'a, T>) -> Self::RefOutput {
-        crate::SoAIndex::get_unchecked(
-            *self.start()..self.end().saturating_add(1),
-            s,
-        )
-    }
-    #[inline]
-    fn index(self, s: CompactSlice<'a, T>) -> Self::RefOutput {
-        crate::SoAIndex::index(*self.start()..self.end().saturating_add(1), s)
-    }
+
+        impl<'a, T: CompactRepr> crate::SoAIndexMut<CompactSliceMut<'a, T>>
+            for $index
+        {
+            type MutOutput = CompactSliceMut<'a, T>;
+            #[inline]
+            fn get_mut(
+                self,
+                $s: CompactSliceMut<'a, T>,
+            ) -> Option<Self::MutOutput> {
+                let $idx = self;
+                $( if $cond {
+                    return None;
+                } )?
+                crate::SoAIndexMut::get_mut($range, $s)
+            }
+            #[inline]
+            unsafe fn get_unchecked_mut(
+                self,
+                $s: CompactSliceMut<'a, T>,
+            ) -> Self::MutOutput {
+                let $idx = self;
+                crate::SoAIndexMut::get_unchecked_mut($range, $s)
+            }
+            #[inline]
+            fn index_mut(
+                self,
+                $s: CompactSliceMut<'a, T>,
+            ) -> Self::MutOutput {
+                let $idx = self;
+                crate::SoAIndexMut::index_mut($range, $s)
+            }
+        }
+    };
 }
 
-impl<'a, T: CompactRepr> crate::SoAIndexMut<CompactSliceMut<'a, T>>
-    for core::ops::RangeInclusive<usize>
-{
-    type MutOutput = CompactSliceMut<'a, T>;
-    #[inline]
-    fn get_mut(self, s: CompactSliceMut<'a, T>) -> Option<Self::MutOutput> {
-        if *self.end() == usize::MAX {
-            None
-        } else {
-            crate::SoAIndexMut::get_mut(
-                *self.start()..self.end().saturating_add(1),
-                s,
-            )
-        }
-    }
-    #[inline]
-    unsafe fn get_unchecked_mut(
-        self,
-        s: CompactSliceMut<'a, T>,
-    ) -> Self::MutOutput {
-        crate::SoAIndexMut::get_unchecked_mut(
-            *self.start()..self.end().saturating_add(1),
-            s,
-        )
-    }
-    #[inline]
-    fn index_mut(self, s: CompactSliceMut<'a, T>) -> Self::MutOutput {
-        crate::SoAIndexMut::index_mut(
-            *self.start()..self.end().saturating_add(1),
-            s,
-        )
-    }
-}
+forward_range_index!(core::ops::RangeTo<usize>, |self_, s| 0..self_.end);
 
-impl<'a, T: CompactRepr> crate::SoAIndex<CompactSlice<'a, T>>
-    for core::ops::RangeToInclusive<usize>
-{
-    type RefOutput = CompactSlice<'a, T>;
-    #[inline]
-    fn get(self, s: CompactSlice<'a, T>) -> Option<Self::RefOutput> {
-        if self.end == usize::MAX {
-            None
-        } else {
-            crate::SoAIndex::get(0..self.end.saturating_add(1), s)
-        }
-    }
-    #[inline]
-    unsafe fn get_unchecked(self, s: CompactSlice<'a, T>) -> Self::RefOutput {
-        crate::SoAIndex::get_unchecked(0..self.end.saturating_add(1), s)
-    }
-    #[inline]
-    fn index(self, s: CompactSlice<'a, T>) -> Self::RefOutput {
-        crate::SoAIndex::index(0..self.end.saturating_add(1), s)
-    }
-}
+forward_range_index!(core::ops::RangeFrom<usize>, |self_, s| self_.start
+    ..s.len);
 
-impl<'a, T: CompactRepr> crate::SoAIndexMut<CompactSliceMut<'a, T>>
-    for core::ops::RangeToInclusive<usize>
-{
-    type MutOutput = CompactSliceMut<'a, T>;
-    #[inline]
-    fn get_mut(self, s: CompactSliceMut<'a, T>) -> Option<Self::MutOutput> {
-        if self.end == usize::MAX {
-            None
-        } else {
-            crate::SoAIndexMut::get_mut(0..self.end.saturating_add(1), s)
-        }
-    }
-    #[inline]
-    unsafe fn get_unchecked_mut(
-        self,
-        s: CompactSliceMut<'a, T>,
-    ) -> Self::MutOutput {
-        crate::SoAIndexMut::get_unchecked_mut(0..self.end.saturating_add(1), s)
-    }
-    #[inline]
-    fn index_mut(self, s: CompactSliceMut<'a, T>) -> Self::MutOutput {
-        crate::SoAIndexMut::index_mut(0..self.end.saturating_add(1), s)
-    }
-}
+forward_range_index!(
+    core::ops::RangeInclusive<usize>,
+    |self_, s| *self_.start()..self_.end().saturating_add(1),
+    none_if * self_.end() == usize::MAX
+);
+
+forward_range_index!(
+    core::ops::RangeToInclusive<usize>,
+    |self_, s| 0..self_.end.saturating_add(1),
+    none_if self_.end == usize::MAX
+);

@@ -21,22 +21,11 @@ pub fn derive(input: &Input) -> TokenStream {
     let ref_doc_url = format!("[`{0}`](struct.{0}.html)", ref_name);
     let ref_mut_doc_url = format!("[`{0}`](struct.{0}.html)", ref_mut_name);
 
-    let fields_names = &input
-        .fields
-        .iter()
-        .map(|field| field.ident.clone().unwrap())
-        .collect::<Vec<_>>();
+    let fields_names = &input.field_idents();
 
     let ptr_fields_types = input
         .map_fields_nested_or(
-            |_, field_type, compact| {
-                if let Some(inner) = compact {
-                    names::ptr_name_compact(inner)
-                } else {
-                    let id = names::ptr_name(field_type);
-                    quote! { #id }
-                }
-            },
+            |_, field_type, compact| names::nested_ptr_ty(field_type, compact),
             |_, field_type| quote! { *const #field_type },
         )
         .collect::<Vec<_>>();
@@ -44,12 +33,7 @@ pub fn derive(input: &Input) -> TokenStream {
     let ptr_mut_fields_types = input
         .map_fields_nested_or(
             |_, field_type, compact| {
-                if let Some(inner) = compact {
-                    names::ptr_mut_name_compact(inner)
-                } else {
-                    let id = names::ptr_mut_name(field_type);
-                    quote! { #id }
-                }
+                names::nested_ptr_mut_ty(field_type, compact)
             },
             |_, field_type| quote! { *mut #field_type },
         )
@@ -72,11 +56,7 @@ pub fn derive(input: &Input) -> TokenStream {
     // The Ref construction sites below use trailing-comma field lists, so the
     // marker init carries no leading comma. Only non-empty for all-compact
     // structs (whose `Ref<'a>` needs a PhantomData marker to use its lifetime).
-    let ref_marker_init: TokenStream = if input.ref_needs_lifetime_marker() {
-        quote! { __layout_ref_marker: ::core::marker::PhantomData }
-    } else {
-        quote! {}
-    };
+    let ref_marker_init = input.ref_marker_init(false);
 
     quote! {
         /// An analog of a pointer to

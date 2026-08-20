@@ -1,4 +1,4 @@
-use proc_macro2::{Ident, Span, TokenStream};
+use proc_macro2::TokenStream;
 use quote::{quote, TokenStreamExt};
 
 use crate::{input::Input, names};
@@ -21,33 +21,15 @@ pub fn derive(input: &Input) -> TokenStream {
 
     let doc_url = format!("[`{0}`](struct.{0}.html)", input.name);
 
-    let fields_names = &input
-        .fields
-        .iter()
-        .map(|field| field.ident.as_ref().unwrap())
-        .collect::<Vec<_>>();
+    let fields_names = &input.field_idents();
 
-    let fields_names_hygienic = input
-        .fields
-        .iter()
-        .enumerate()
-        .map(|(i, _)| {
-            Ident::new(&format!("___layout_private_{}", i), Span::call_site())
-        })
-        .collect::<Vec<_>>();
+    let fields_names_hygienic = input.hygienic_idents("");
 
     let first_field = &fields_names[0];
 
     let vec_fields_types = input
         .map_fields_nested_or(
-            |_, field_type, compact| {
-                if let Some(inner) = compact {
-                    names::vec_name_compact(inner)
-                } else {
-                    let t = names::vec_name(field_type);
-                    quote! { #t }
-                }
-            },
+            |_, field_type, compact| names::nested_vec_ty(field_type, compact),
             |_, field_type| quote! { ::layout::Column<#field_type> },
         )
         .collect::<Vec<_>>();
@@ -76,10 +58,7 @@ pub fn derive(input: &Input) -> TokenStream {
     let vec_from_raw_parts = input
         .map_fields_nested_or(
             |ident, field_type, compact| {
-                let vec_type = if let Some(inner) = compact { names::vec_name_compact(inner) } else {
-                    let t = names::vec_name(field_type);
-                    quote! { #t }
-                };
+                let vec_type = names::nested_vec_ty(field_type, compact);
                 if compact.is_some() {
                     quote! { <#vec_type>::from_raw_parts(data.#ident) }
                 } else {
@@ -100,16 +79,36 @@ pub fn derive(input: &Input) -> TokenStream {
     let drain_fields_types = input
         .map_fields_nested_or(
             |_, field_type, compact| {
-                if let Some(inner) = compact {
-                    names::drain_name_compact(inner)
-                } else {
-                    let t = names::drain_name(field_type);
-                    quote! { #t<'a> }
-                }
+                names::nested_drain_ty(field_type, compact)
             },
             |_, field_type| quote! { ::layout::Drain<'a, #field_type> },
         )
         .collect::<Vec<_>>();
+
+    // `retain` and `retain_mut` compact in place identically; they differ
+    // only in the accessor building the handle handed to the predicate.
+    let retain_body = |accessor: TokenStream| {
+        quote! {
+            let mut slice = self.as_mut_slice();
+            let len = slice.len();
+            let mut write_idx = 0;
+
+            for read_idx in 0..len {
+                if f(slice.#accessor(read_idx).unwrap()) {
+                    if write_idx != read_idx {
+                        slice.swap(write_idx, read_idx);
+                    }
+                    write_idx += 1;
+                }
+            }
+
+            if write_idx < len {
+                self.truncate(write_idx);
+            }
+        }
+    };
+    let retain = retain_body(quote! { get });
+    let retain_mut = retain_body(quote! { get_mut });
 
     let mut generated = quote! {
         /// An analog to `
@@ -371,44 +370,14 @@ pub fn derive(input: &Input) -> TokenStream {
             #[doc = #vec_name_str]
             /// ::retain()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.retain).
             pub fn retain<F>(&mut self, mut f: F) where F: FnMut(#ref_name) -> bool {
-                let mut slice = self.as_mut_slice();
-                let len = slice.len();
-                let mut write_idx = 0;
-
-                for read_idx in 0..len {
-                    if f(slice.get(read_idx).unwrap()) {
-                        if write_idx != read_idx {
-                            slice.swap(write_idx, read_idx);
-                        }
-                        write_idx += 1;
-                    }
-                }
-
-                if write_idx < len {
-                    self.truncate(write_idx);
-                }
+                #retain
             }
 
             /// Similar to [`
             #[doc = #vec_name_str]
             /// ::retain_mut()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.retain_mut).
             pub fn retain_mut<F>(&mut self, mut f: F) where F: FnMut(#ref_mut_name) -> bool {
-                let mut slice = self.as_mut_slice();
-                let len = slice.len();
-                let mut write_idx = 0;
-
-                for read_idx in 0..len {
-                    if f(slice.get_mut(read_idx).unwrap()) {
-                        if write_idx != read_idx {
-                            slice.swap(write_idx, read_idx);
-                        }
-                        write_idx += 1;
-                    }
-                }
-
-                if write_idx < len {
-                    self.truncate(write_idx);
-                }
+                #retain_mut
             }
 
             /// Similar to [`

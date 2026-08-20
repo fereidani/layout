@@ -40,11 +40,7 @@ pub fn derive(input: &Input) -> TokenStream {
     // lists (no trailing comma), so the marker init carries a leading
     // comma. It is only non-empty for all-compact structs (whose `Ref<'a>`
     // needs a PhantomData marker to use its lifetime).
-    let ref_marker_init: TokenStream = if input.ref_needs_lifetime_marker() {
-        quote! { , __layout_ref_marker: ::core::marker::PhantomData }
-    } else {
-        quote! {}
-    };
+    let ref_marker_init = input.ref_marker_init(true);
 
     let slice_subslice_fields = input
         .map_fields_nested_or(
@@ -57,40 +53,17 @@ pub fn derive(input: &Input) -> TokenStream {
     let doc_url = format!("[`{0}`](struct.{0}.html)", input.name);
     let vec_doc_url = format!("[`{0}`](struct.{0}.html)", vec_name);
 
-    let fields_names = &input
-        .fields
-        .iter()
-        .map(|field| field.ident.as_ref().unwrap())
-        .collect::<Vec<_>>();
+    let fields_names = &input.field_idents();
 
     let first_field = &fields_names[0];
 
-    let fields_names_hygienic_1 = input
-        .fields
-        .iter()
-        .enumerate()
-        .map(|(i, _)| {
-            Ident::new(&format!("___layout_private_1_{}", i), Span::call_site())
-        })
-        .collect::<Vec<_>>();
-    let fields_names_hygienic_2 = input
-        .fields
-        .iter()
-        .enumerate()
-        .map(|(i, _)| {
-            Ident::new(&format!("___layout_private_2_{}", i), Span::call_site())
-        })
-        .collect::<Vec<_>>();
+    let fields_names_hygienic_1 = input.hygienic_idents("1_");
+    let fields_names_hygienic_2 = input.hygienic_idents("2_");
 
     let slice_fields_types = input
         .map_fields_nested_or(
             |_, field_type, compact| {
-                if let Some(inner) = compact {
-                    names::slice_name_compact(inner)
-                } else {
-                    let id = names::slice_name(field_type);
-                    quote! { #id<'a> }
-                }
+                names::nested_slice_ty(field_type, compact)
             },
             |_, field_type| quote! { &'a [#field_type] },
         )
@@ -115,10 +88,7 @@ pub fn derive(input: &Input) -> TokenStream {
     let slice_from_raw_parts = input
         .map_fields_nested_or(
             |ident, field_type, compact| {
-                let slice_type = if let Some(inner) = compact { names::slice_name_compact(inner) } else {
-                    let id = names::slice_name(field_type);
-                    quote! { #id<'a> }
-                };
+                let slice_type = names::nested_slice_ty(field_type, compact);
                 quote! { <#slice_type>::from_raw_parts(data.#ident, len) }
             },
             |ident, _| quote! { ::core::slice::from_raw_parts(data.#ident, len) },
@@ -493,17 +463,15 @@ pub fn derive(input: &Input) -> TokenStream {
             }
         });
 
-        {
-            generated.append_all(quote! {
-                impl<'a> ::layout::ToSoAVec<#name> for #slice_name<'a> {
-                    type SoAVecType = #vec_name;
+        generated.append_all(quote! {
+            impl<'a> ::layout::ToSoAVec<#name> for #slice_name<'a> {
+                type SoAVecType = #vec_name;
 
-                    fn to_vec(&self) -> Self::SoAVecType {
-                        self.to_vec()
-                    }
+                fn to_vec(&self) -> Self::SoAVecType {
+                    self.to_vec()
                 }
-            });
-        }
+            }
+        });
     }
 
     return generated;
@@ -529,45 +497,16 @@ pub fn derive_mut(input: &Input) -> TokenStream {
     let slice_mut_doc_url = format!("[`{0}`](struct.{0}.html)", slice_mut_name);
     let vec_doc_url = format!("[`{0}`](struct.{0}.html)", vec_name);
 
-    let fields_names = &input
-        .fields
-        .iter()
-        .map(|field| field.ident.clone().unwrap())
-        .collect::<Vec<_>>();
+    let fields_names = &input.field_idents();
 
     let first_field = &fields_names[0];
-    let fields_names_hygienic_1 = &input
-        .fields
-        .iter()
-        .enumerate()
-        .map(|(i, _)| {
-            Ident::new(
-                &format!("___layout_private_slice_1_{}", i),
-                Span::call_site(),
-            )
-        })
-        .collect::<Vec<_>>();
-    let fields_names_hygienic_2 = &input
-        .fields
-        .iter()
-        .enumerate()
-        .map(|(i, _)| {
-            Ident::new(
-                &format!("___layout_private_slice_2_{}", i),
-                Span::call_site(),
-            )
-        })
-        .collect::<Vec<_>>();
+    let fields_names_hygienic_1 = &input.hygienic_idents("slice_1_");
+    let fields_names_hygienic_2 = &input.hygienic_idents("slice_2_");
 
     let slice_mut_fields_types = input
         .map_fields_nested_or(
             |_, field_type, compact| {
-                if let Some(inner) = compact {
-                    names::slice_mut_name_compact(inner)
-                } else {
-                    let id = names::slice_mut_name(field_type);
-                    quote! { #id<'a> }
-                }
+                names::nested_slice_mut_ty(field_type, compact)
             },
             |_, field_type| quote! { &'a mut [#field_type] },
         )
@@ -606,10 +545,7 @@ pub fn derive_mut(input: &Input) -> TokenStream {
     let slice_from_raw_parts_mut = input
         .map_fields_nested_or(
             |ident, field_type, compact| {
-                let slice_type = if let Some(inner) = compact { names::slice_mut_name_compact(inner) } else {
-                    let id = names::slice_mut_name(field_type);
-                    quote! { #id<'a> }
-                };
+                let slice_type = names::nested_slice_mut_ty(field_type, compact);
                 quote! { <#slice_type>::from_raw_parts_mut(data.#ident, len) }
             },
             |ident, _| quote! {::core::slice::from_raw_parts_mut(data.#ident, len) },
@@ -650,57 +586,36 @@ pub fn derive_mut(input: &Input) -> TokenStream {
     let chunks_mut_ptr_fields_types = input
         .map_fields_nested_or(
             |_, field_type, compact| {
-                if let Some(inner) = compact {
-                    names::ptr_mut_name_compact(inner)
-                } else {
-                    let id = names::ptr_mut_name(field_type);
-                    quote! { #id }
-                }
+                names::nested_ptr_mut_ty(field_type, compact)
             },
             |_, field_type| quote! { *mut #field_type },
         )
         .collect::<Vec<_>>();
 
-    let chunks_mut_init_ptrs = input
-        .map_fields_nested_or(
-            |ident, _, _| quote! { self.#ident.as_mut_ptr() },
-            |ident, _| quote! { self.#ident.as_mut_ptr() },
-        )
-        .collect::<Vec<_>>();
+    // A mutable chunk rebuilds a sub-slice of `len` elements from the raw
+    // pointer stored per column, offset to the iterator's current position.
+    let chunk_from_ptr = |len: TokenStream| {
+        input
+            .map_fields_nested_or(
+                |ident, field_type, compact| {
+                    let slice_mut_type =
+                        names::nested_slice_mut_ty(field_type, compact);
+                    quote! { unsafe { <#slice_mut_type>::from_raw_parts_mut(self.#ident.add(self.pos), #len) } }
+                },
+                |ident, _| quote! { unsafe { ::core::slice::from_raw_parts_mut(self.#ident.add(self.pos), #len) } },
+            )
+            .collect::<Vec<_>>()
+    };
 
-    let chunks_mut_next_fields = input
-        .map_fields_nested_or(
-            |ident, field_type, compact| {
-                let slice_mut_type = if let Some(inner) = compact { names::slice_mut_name_compact(inner) } else {
-                    let id = names::slice_mut_name(field_type);
-                    quote! { #id<'a> }
-                };
-                quote! { unsafe { <#slice_mut_type>::from_raw_parts_mut(self.#ident.add(self.pos), chunk_len) } }
-            },
-            |ident, _| quote! { unsafe { ::core::slice::from_raw_parts_mut(self.#ident.add(self.pos), chunk_len) } },
-        )
-        .collect::<Vec<_>>();
-
-    let chunks_exact_mut_next_fields = input
-        .map_fields_nested_or(
-            |ident, field_type, compact| {
-                let slice_mut_type = if let Some(inner) = compact { names::slice_mut_name_compact(inner) } else {
-                    let id = names::slice_mut_name(field_type);
-                    quote! { #id<'a> }
-                };
-                quote! { unsafe { <#slice_mut_type>::from_raw_parts_mut(self.#ident.add(self.pos), self.chunk_size) } }
-            },
-            |ident, _| quote! { unsafe { ::core::slice::from_raw_parts_mut(self.#ident.add(self.pos), self.chunk_size) } },
-        )
-        .collect::<Vec<_>>();
+    let chunks_mut_next_fields = chunk_from_ptr(quote! { chunk_len });
+    let chunks_exact_mut_next_fields =
+        chunk_from_ptr(quote! { self.chunk_size });
 
     let chunks_exact_mut_remainder_fields = input
         .map_fields_nested_or(
             |ident, field_type, compact| {
-                let slice_mut_type = if let Some(inner) = compact { names::slice_mut_name_compact(inner) } else {
-                    let id = names::slice_mut_name(field_type);
-                    quote! { #id<'a> }
-                };
+                let slice_mut_type =
+                    names::nested_slice_mut_ty(field_type, compact);
                 quote! { unsafe { <#slice_mut_type>::from_raw_parts_mut(self.#ident.add(rem_start), rem_len) } }
             },
             |ident, _| quote! { unsafe { ::core::slice::from_raw_parts_mut(self.#ident.add(rem_start), rem_len) } },
@@ -1288,7 +1203,7 @@ pub fn derive_mut(input: &Input) -> TokenStream {
                     assert!(chunk_size != 0, "chunk size must be non-zero");
                     let #fields_names_len = self.len();
                     #chunks_mut_name {
-                        #( #fields_names: #chunks_mut_init_ptrs, )*
+                        #( #fields_names: self.#fields_names.as_mut_ptr(), )*
                         #fields_names_len,
                         chunk_size,
                         pos: 0,
@@ -1308,7 +1223,7 @@ pub fn derive_mut(input: &Input) -> TokenStream {
                     let rem = #fields_names_len % chunk_size;
                     let end = #fields_names_len - rem;
                     #chunks_exact_mut_name {
-                        #( #fields_names: #chunks_mut_init_ptrs, )*
+                        #( #fields_names: self.#fields_names.as_mut_ptr(), )*
                         #fields_names_len,
                         chunk_size,
                         pos: 0,
@@ -1334,17 +1249,15 @@ pub fn derive_mut(input: &Input) -> TokenStream {
             }
         });
 
-        {
-            generated.append_all(quote! {
-                impl<'a> ::layout::ToSoAVec<#name> for #slice_mut_name<'a> {
-                    type SoAVecType = #vec_name;
+        generated.append_all(quote! {
+            impl<'a> ::layout::ToSoAVec<#name> for #slice_mut_name<'a> {
+                type SoAVecType = #vec_name;
 
-                    fn to_vec(&self) -> Self::SoAVecType {
-                        self.to_vec()
-                    }
+                fn to_vec(&self) -> Self::SoAVecType {
+                    self.to_vec()
                 }
-            });
-        }
+            }
+        });
     }
 
     return generated;

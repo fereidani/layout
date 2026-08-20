@@ -52,15 +52,8 @@ impl ExtraAttributes {
 
     /// Add a single trait from `#[layout]`
     fn add_derive(&mut self, ident: &proc_macro2::Ident) {
-        let derive_only_vec = |ident| {
-            static EXCEPTIONS: &[&str] = &["Clone", "Deserialize", "Serialize"];
-            for exception in EXCEPTIONS {
-                if ident == exception {
-                    return true;
-                }
-            }
-            return false;
-        };
+        // Traits that only make sense on the owning `Vec` type.
+        static VEC_ONLY: &[&str] = &["Clone", "Deserialize", "Serialize"];
 
         let derive = Meta::List(MetaList {
             path: Path::from(syn::Ident::new("derive", Span::call_site())),
@@ -70,7 +63,7 @@ impl ExtraAttributes {
             tokens: quote! { #ident },
         });
 
-        if !derive_only_vec(ident) {
+        if !VEC_ONLY.iter().any(|trait_name| ident == trait_name) {
             self.slice.push(derive.clone());
             self.slice_mut.push(derive.clone());
             self.ref_.push(derive.clone());
@@ -89,12 +82,7 @@ impl ExtraAttributes {
 }
 
 fn contains_nested_soa(attrs: &[Attribute]) -> bool {
-    for attr in attrs {
-        if attr.path().is_ident("nested_soa") {
-            return true;
-        }
-    }
-    return false;
+    attrs.iter().any(|attr| attr.path().is_ident("nested_soa"))
 }
 
 /// If `ty` is a compact column marker (`Compact<T>` or the `CompactBool`
@@ -136,7 +124,7 @@ impl Input {
         let mut field_is_compact = Vec::new();
         match input.data {
             Data::Struct(s) => {
-                for field in s.fields.iter().cloned() {
+                for field in &s.fields {
                     let compact = compact_inner(&field.ty);
                     let is_nested =
                         contains_nested_soa(&field.attrs) || compact.is_some();
@@ -195,29 +183,20 @@ impl Input {
                 let attr =
                     nested.last().expect("should have 2 elements").clone();
 
-                match soa_type.path().get_ident() {
-                    Some(ident) => {
-                        if ident == "Vec" {
-                            extra_attrs.vec.push(attr);
-                        } else if ident == "Slice" {
-                            extra_attrs.slice.push(attr);
-                        } else if ident == "SliceMut" {
-                            extra_attrs.slice_mut.push(attr);
-                        } else if ident == "Ref" {
-                            extra_attrs.ref_.push(attr);
-                        } else if ident == "RefMut" {
-                            extra_attrs.ref_mut.push(attr);
-                        } else if ident == "Ptr" {
-                            extra_attrs.ptr.push(attr);
-                        } else if ident == "PtrMut" {
-                            extra_attrs.ptr_mut.push(attr);
-                        } else {
-                            panic!(
-                                "expected one of the SoA type, got {}",
-                                quote!(#soa_type)
-                            );
-                        }
+                let target = soa_type.path().get_ident().and_then(|ident| {
+                    match ident.to_string().as_str() {
+                        "Vec" => Some(&mut extra_attrs.vec),
+                        "Slice" => Some(&mut extra_attrs.slice),
+                        "SliceMut" => Some(&mut extra_attrs.slice_mut),
+                        "Ref" => Some(&mut extra_attrs.ref_),
+                        "RefMut" => Some(&mut extra_attrs.ref_mut),
+                        "Ptr" => Some(&mut extra_attrs.ptr),
+                        "PtrMut" => Some(&mut extra_attrs.ptr_mut),
+                        _ => None,
                     }
+                });
+                match target {
+                    Some(list) => list.push(attr),
                     None => panic!(
                         "expected one of the SoA type, got {}",
                         quote!(#soa_type)
@@ -247,6 +226,45 @@ impl Input {
     pub(crate) fn ref_needs_lifetime_marker(&self) -> bool {
         !self.field_is_compact.is_empty()
             && self.field_is_compact.iter().all(Option::is_some)
+    }
+
+    /// The ident of every field, in declaration order.
+    pub(crate) fn field_idents(&self) -> Vec<&syn::Ident> {
+        self.fields
+            .iter()
+            .map(|field| field.ident.as_ref().expect("missing ident"))
+            .collect()
+    }
+
+    /// One hygienic `___layout_private_{prefix}{i}` binding per field, for
+    /// generated `let` destructuring that must not collide with a user field.
+    pub(crate) fn hygienic_idents(&self, prefix: &str) -> Vec<syn::Ident> {
+        (0..self.fields.len())
+            .map(|i| {
+                syn::Ident::new(
+                    &format!("___layout_private_{}{}", prefix, i),
+                    Span::call_site(),
+                )
+            })
+            .collect()
+    }
+
+    /// Field initializer for the hidden `Ref<'a>` lifetime marker, empty
+    /// unless the struct is all-compact (see
+    /// [`ref_needs_lifetime_marker`](Self::ref_needs_lifetime_marker)).
+    /// `leading_comma` selects the form for a comma-separated field list with
+    /// no trailing comma.
+    pub(crate) fn ref_marker_init(&self, leading_comma: bool) -> TokenStream {
+        if !self.ref_needs_lifetime_marker() {
+            return quote! {};
+        }
+        let marker =
+            quote! { __layout_ref_marker: ::core::marker::PhantomData };
+        if leading_comma {
+            quote! { , #marker }
+        } else {
+            marker
+        }
     }
 
     /// Map over all fields in the struct, calling the first function if the
