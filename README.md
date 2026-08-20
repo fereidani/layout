@@ -1,13 +1,18 @@
-# Layout: struct-of-arrays and data-oriented design in Rust
+<div align="center">
 
-<p align="center">
-  <img src="logo.svg" alt="Layout logo" width="480">
-</p>
+# Layout
+
+**Struct-of-Arrays** and **data-oriented design** in Rust
+
+<img src="logo.svg" alt="Layout logo" width="250" >
+<br><br>
 
 [![Crates.io](https://img.shields.io/crates/v/layout.svg?style=for-the-badge)](https://crates.io/crates/layout)
 [![License](https://img.shields.io/crates/l/layout.svg?style=for-the-badge)](https://github.com/fereidani/layout)
 [![CI](https://img.shields.io/github/actions/workflow/status/fereidani/layout/tests.yml?branch=main&style=for-the-badge)](https://github.com/fereidani/layout/actions)
 [![Docs](https://img.shields.io/docsrs/layout?style=for-the-badge)](https://docs.rs/layout)
+
+</div>
 
 ## Introduction
 
