@@ -206,7 +206,7 @@ values; the feature works with `no_std` + `alloc`.
 
 ```toml
 [dependencies]
-layout = { version = "0.1", features = ["serde"] }
+layout = { version = "0.2", features = ["serde"] }
 serde  = { version = "1", features = ["derive"] }
 ```
 
