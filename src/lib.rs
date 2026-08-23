@@ -280,6 +280,8 @@ pub mod bitpack;
 pub mod column;
 pub mod compact;
 pub mod cursor;
+#[doc(hidden)]
+pub mod panics;
 
 // Re-exported for use in generated code. Not intended for direct use.
 #[doc(hidden)]

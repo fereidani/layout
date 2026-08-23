@@ -243,8 +243,9 @@ pub fn derive(input: &Input) -> TokenStream {
             #[doc = #vec_name_str]
             /// ::insert()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.insert).
             pub fn insert(&mut self, index: usize, element: #name) {
-                if ::layout::branches::unlikely(index > self.len()) {
-                    panic!("insertion index (is {}) should be <= len (is {})", index, self.len());
+                let len = self.len();
+                if ::layout::branches::unlikely(index > len) {
+                    ::layout::panics::insert_index_fail(index, len);
                 }
 
                 // ManuallyDrop: see `push` — a mid-insert unwind can't double-free read-out fields.
@@ -256,8 +257,9 @@ pub fn derive(input: &Input) -> TokenStream {
 
             /// Similar to [`core::mem::replace()`](https://doc.rust-lang.org/std/mem/fn.replace.html).
             pub fn replace(&mut self, index: usize, element: #name) -> #name {
-                if ::layout::branches::unlikely(index >= self.len()) {
-                    panic!("index out of bounds: the len is {} but the index is {}", self.len(), index);
+                let len = self.len();
+                if ::layout::branches::unlikely(index >= len) {
+                    ::layout::panics::index_out_of_bounds(index, len);
                 }
 
                 // ManuallyDrop: see `push` — a mid-replace unwind can't double-free read-out fields.

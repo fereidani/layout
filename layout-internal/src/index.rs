@@ -25,20 +25,6 @@ pub fn derive(input: &Input) -> TokenStream {
         |ident, _| quote! { slice.#ident.get_unchecked_mut(self.clone()) },
     ).collect::<Vec<_>>();
 
-    let index = input
-        .map_fields_nested_or(
-            |ident, _, _| quote! { ::layout::SoAIndex::index(self.clone(), slice.#ident) },
-            |ident, _| quote! { & slice.#ident[self.clone()] },
-        )
-        .collect::<Vec<_>>();
-
-    let index_mut = input
-        .map_fields_nested_or(
-            |ident, _, _| quote! { ::layout::SoAIndexMut::index_mut(self.clone(), slice.#ident) },
-            |ident, _| quote! { &mut slice.#ident[self.clone()] },
-        )
-        .collect::<Vec<_>>();
-
     // The Ref construction sites below use trailing-comma field lists, so the
     // marker init carries no leading comma. Only non-empty for all-compact
     // structs (whose `Ref<'a>` needs a PhantomData marker to use its lifetime).
@@ -220,10 +206,13 @@ pub fn derive(input: &Input) -> TokenStream {
 
             #[inline]
             fn index(self, slice: #slice_name<'a>) -> Self::RefOutput {
-                #ref_name {
-                    #( #fields_names: #index, )*
-                    #ref_marker_init
+                let len = slice.#first_field_name.len();
+                if ::layout::branches::unlikely(self >= len) {
+                    ::layout::panics::index_out_of_bounds(self, len);
                 }
+                // SAFETY: `self < len` and every column has that same
+                // length.
+                unsafe { ::layout::SoAIndex::get_unchecked(self, slice) }
             }
         }
 
@@ -248,9 +237,13 @@ pub fn derive(input: &Input) -> TokenStream {
 
             #[inline]
             fn index_mut(self, slice: #slice_mut_name<'a>) -> Self::MutOutput {
-                #ref_mut_name {
-                    #( #fields_names: #index_mut, )*
+                let len = slice.len();
+                if ::layout::branches::unlikely(self >= len) {
+                    ::layout::panics::index_out_of_bounds(self, len);
                 }
+                // SAFETY: `self < len` and every column has that same
+                // length.
+                unsafe { ::layout::SoAIndexMut::get_unchecked_mut(self, slice) }
             }
         }
 
@@ -278,9 +271,16 @@ pub fn derive(input: &Input) -> TokenStream {
 
             #[inline]
             fn index(self, slice: #slice_name<'a>) -> Self::RefOutput {
-                #slice_name {
-                    #( #fields_names: #index, )*
+                let len = slice.#first_field_name.len();
+                if ::layout::branches::unlikely(self.start > self.end) {
+                    ::layout::panics::slice_index_order_fail(self.start, self.end);
                 }
+                if ::layout::branches::unlikely(self.end > len) {
+                    ::layout::panics::slice_end_index_len_fail(self.end, len);
+                }
+                // SAFETY: `start <= end <= len` and every column has that
+                // same length.
+                unsafe { ::layout::SoAIndex::get_unchecked(self, slice) }
             }
         }
 
@@ -305,9 +305,16 @@ pub fn derive(input: &Input) -> TokenStream {
 
             #[inline]
             fn index_mut(self, slice: #slice_mut_name<'a>) -> Self::MutOutput {
-                #slice_mut_name {
-                    #( #fields_names: #index_mut, )*
+                let len = slice.#first_field_name.len();
+                if ::layout::branches::unlikely(self.start > self.end) {
+                    ::layout::panics::slice_index_order_fail(self.start, self.end);
                 }
+                if ::layout::branches::unlikely(self.end > len) {
+                    ::layout::panics::slice_end_index_len_fail(self.end, len);
+                }
+                // SAFETY: `start <= end <= len` and every column has that
+                // same length.
+                unsafe { ::layout::SoAIndexMut::get_unchecked_mut(self, slice) }
             }
         }
 
