@@ -491,6 +491,28 @@ pub fn derive_mut(input: &Input) -> TokenStream {
     let chunks_mut_name = names::chunks_mut_name(&input.name);
     let chunks_exact_mut_name = names::chunks_exact_mut_name(&input.name);
 
+    // Column swap after one shared bounds check: plain columns swap through
+    // raw pointers (`slice::swap` would re-check both indices per column),
+    // compact and nested columns keep their own checked op, whose cost is
+    // dominated by the bit or sub-column work.
+    let swap_unchecked = input
+        .map_fields_nested_or(
+            |ident, _, _| quote! { self.#ident.swap(a, b) },
+            |ident, _| {
+                quote! {
+                    {
+                        let base = self.#ident.as_mut_ptr();
+                        // SAFETY: `a` and `b` are both `< len`, which is the
+                        // length of every column.
+                        unsafe {
+                            ::core::ptr::swap(base.add(a), base.add(b));
+                        }
+                    }
+                }
+            },
+        )
+        .collect::<Vec<_>>();
+
     let slice_name_str = format!("[{}]", input.name);
     let doc_url = format!("[`{0}`](struct.{0}.html)", input.name);
     let slice_doc_url = format!("[`{0}`](struct.{0}.html)", slice_name);
@@ -765,9 +787,14 @@ pub fn derive_mut(input: &Input) -> TokenStream {
             #[doc = #slice_name_str]
             /// ::swap()`](https://doc.rust-lang.org/std/primitive.slice.html#method.swap).
             pub fn swap(&mut self, a: usize, b: usize) {
-                #(
-                    self.#fields_names.swap(a, b);
-                )*
+                let len = self.len();
+                if ::layout::branches::unlikely(a >= len) {
+                    ::layout::panics::index_out_of_bounds(a, len);
+                }
+                if ::layout::branches::unlikely(b >= len) {
+                    ::layout::panics::index_out_of_bounds(b, len);
+                }
+                #( #swap_unchecked; )*
             }
 
             /// Similar to [`&
