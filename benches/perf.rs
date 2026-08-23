@@ -143,6 +143,79 @@ fn compact_eq(b: &mut Bencher) {
     b.iter(|| black_box(x == y));
 }
 
+// --- element access on a wide struct: one shared bounds check, not one per
+// column ---
+
+#[derive(Clone, SOA)]
+#[layout(Clone)]
+pub struct Wide {
+    a: u32,
+    b: u32,
+    c: f32,
+    d: f32,
+    e: u64,
+    f: u16,
+    g: u16,
+    h: u8,
+    i: u8,
+    j: [u32; 4],
+    k: i64,
+    l: i32,
+}
+
+fn build_wide(n: usize) -> WideVec {
+    let mut v = WideVec::with_capacity(n);
+    for i in 0..n {
+        v.push(Wide {
+            a: i as u32,
+            b: (i % 7) as u32,
+            c: 0.0,
+            d: 0.0,
+            e: 0,
+            f: 0,
+            g: 0,
+            h: 0,
+            i: 0,
+            j: [0; 4],
+            k: (i % 1000) as i64,
+            l: 0,
+        });
+    }
+    v
+}
+
+fn wide_index_sum(b: &mut Bencher) {
+    let v = build_wide(N);
+    b.iter(|| {
+        let mut sum = 0u64;
+        for i in 0..v.len() {
+            let r = v.index(i);
+            sum += u64::from(*r.a) + u64::from(*r.b) + *r.e;
+        }
+        black_box(sum)
+    });
+}
+
+fn wide_iter_sum(b: &mut Bencher) {
+    let v = build_wide(N);
+    b.iter(|| {
+        let mut sum = 0u64;
+        for r in v.iter() {
+            sum += u64::from(*r.a);
+        }
+        black_box(sum)
+    });
+}
+
+fn wide_retain(b: &mut Bencher) {
+    let base = build_wide(N);
+    b.iter(|| {
+        let mut v = base.clone();
+        v.retain(|r| *r.b != 0);
+        black_box(v.len())
+    });
+}
+
 // --- permutation apply (in-place reverse, no clone per iteration) ---
 
 fn apply_index_reverse(b: &mut Bencher) {
@@ -225,6 +298,9 @@ benchmark_group!(
     compact_insert_remove_mid,
     plain_bool_insert_remove_mid,
     compact_sort,
-    plain_bool_sort
+    plain_bool_sort,
+    wide_index_sum,
+    wide_iter_sum,
+    wide_retain
 );
 benchmark_main!(perf);
