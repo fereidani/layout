@@ -279,6 +279,7 @@ pub use layout_internal::SOA;
 pub mod bitpack;
 pub mod column;
 pub mod compact;
+pub mod cursor;
 
 // Re-exported for use in generated code. Not intended for direct use.
 #[doc(hidden)]
@@ -307,6 +308,8 @@ pub use compact::{
     CompactIter, CompactIterMut, CompactPtr, CompactPtrMut, CompactRefMut,
     CompactSlice, CompactSliceMut, CompactVec,
 };
+#[doc(hidden)]
+pub use cursor::{ColumnCursor, ColumnCursorMut};
 /// Derive macro implementing [`CompactRepr`] for a fieldless enum.
 ///
 /// Requires an unsigned `#[repr(uN)]`. Storage width is sized by the

@@ -33,14 +33,14 @@ pub fn derive(input: &Input) -> TokenStream {
     let iter_fields_types = input
         .map_fields_nested_or(
             |_, field_type, _| quote! { <#field_type as layout::SoAIter<'a>>::Iter },
-            |_, field_type| quote! { ::core::slice::Iter<'a, #field_type> },
+            |_, field_type| quote! { ::layout::ColumnCursor<'a, #field_type> },
         )
         .collect::<Vec<_>>();
 
     let iter_mut_fields_types = input
         .map_fields_nested_or(
             |_, field_type, _| quote! { <#field_type as layout::SoAIter<'a>>::IterMut },
-            |_, field_type| quote! { ::core::slice::IterMut<'a, #field_type> },
+            |_, field_type| quote! { ::layout::ColumnCursorMut<'a, #field_type> },
         )
         .collect::<Vec<_>>();
 
@@ -49,14 +49,14 @@ pub fn derive(input: &Input) -> TokenStream {
     let into_iter_fields = input
         .map_fields_nested_or(
             |ident, _, _| quote! { self.#ident.into_iter() },
-            |ident, _| quote! { self.#ident.iter() },
+            |ident, _| quote! { ::layout::ColumnCursor::new(self.#ident) },
         )
         .collect::<Vec<_>>();
 
     let into_iter_mut_fields = input
         .map_fields_nested_or(
             |ident, _, _| quote! { self.#ident.into_iter() },
-            |ident, _| quote! { self.#ident.iter_mut() },
+            |ident, _| quote! { ::layout::ColumnCursorMut::new(self.#ident) },
         )
         .collect::<Vec<_>>();
 
