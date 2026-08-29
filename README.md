@@ -23,77 +23,150 @@ contiguous array, so a pass over one field loads only that field's memory.
 This crate is a hard fork of [soa-derive](https://github.com/lumol-org/soa-derive)
 with `no_std` support and extra features like impl block and compact bool and enums.
 
-Add `#[derive(SOA)]` to a struct:
+## Example
+
+One struct shows everything the crate offers: the derive, extra derives for the
+generated types, a nested struct of arrays, bit-packed columns, and methods
+that also run on borrowed rows.
 
 ```rust
-#[derive(SOA)]
-pub struct Cheese {
-    pub smell: f64,
-    pub color: (f64, f64, f64),
-    pub with_mushrooms: bool,
-    pub name: String,
-}
-```
+use layout::{soa_impl, soa_zip, Compact, CompactRepr, SOA};
 
-The derive generates `CheeseVec`:
-
-```rust
-pub struct CheeseVec {
-    pub smell: Vec<f64>,
-    pub color: Vec<(f64, f64, f64)>,
-    pub with_mushrooms: Vec<bool>,
-    pub name: Vec<String>,
-}
-```
-
-`CheeseVec` has the same API as `Vec<Cheese>`, plus helper types that mirror how
-you borrow a `Cheese`:
-
-| Helper           | Stands in for   |
-| ---------------- | --------------- |
-| `CheeseSlice`    | `&[Cheese]`     |
-| `CheeseSliceMut` | `&mut [Cheese]` |
-| `CheeseRef`      | `&Cheese`       |
-| `CheeseRefMut`   | `&mut Cheese`   |
-
-Every derived struct implements the `SOA` trait. Use `<Cheese as SOA>::Type` when
-you need the generated type generically instead of naming `CheeseVec`.
-
-### Auto-generated methods on refs (`#[soa_impl]`)
-
-A method written on `Cheese` will not run on `CheeseRef` unless you write it
-twice. `#[soa_impl]` copies an `impl` block onto the generated reference types
-for you.
-
-```rust
-use layout::{soa_impl, SOA};
-
-#[derive(SOA)]
-pub struct Particle {
-    pub name: String,
-    pub mass: f64,
+// A fieldless enum with an unsigned repr can be bit-packed:
+// four variants fit in 2 bits.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, CompactRepr)]
+enum Kind {
+    Player,
+    Enemy,
+    Projectile,
+    Pickup,
 }
 
+#[derive(Debug, Clone, PartialEq, SOA)]
+#[layout(Debug, Clone, PartialEq)]
+struct Position {
+    x: f32,
+    y: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, SOA)]
+#[layout(Debug, Clone, PartialEq)] // derives for EntityVec, EntityRef, ...
+struct Entity {
+    name: String,
+    mass: f32,
+    #[nested_soa]
+    position: Position, // stored as a PositionVec, not a Vec<Position>
+    active: Compact<bool>, // 1 bit per entity instead of 1 byte
+    kind: Compact<Kind>, // 2 bits per entity
+}
+
+// Copies the methods onto EntityRef (&self) and EntityRefMut (&mut self).
 #[soa_impl]
-impl Particle {
-    // &self methods land on ParticleRef<'a>
-    pub fn kinetic_energy(&self, velocity: f64) -> f64 {
+impl Entity {
+    fn kinetic_energy(&self, velocity: f32) -> f32 {
         0.5 * self.mass * velocity * velocity
     }
 
-    // &mut self methods land on ParticleRefMut<'a>
-    pub fn scale_mass(&mut self, factor: f64) {
+    fn scale_mass(&mut self, factor: f32) {
         self.mass *= factor;
     }
+}
 
-    // associated functions and Self-returning methods stay on Particle only
-    pub fn new(name: String, mass: f64) -> Self {
-        Particle { name, mass }
+fn main() {
+    let mut entities = EntityVec::new();
+    entities.push(Entity {
+        name: "hero".into(),
+        mass: 80.0,
+        position: Position { x: 0.0, y: 0.0 },
+        active: Compact(true),
+        kind: Compact(Kind::Player),
+    });
+    entities.push(Entity {
+        name: "slime".into(),
+        mass: 12.0,
+        position: Position { x: 4.0, y: 1.0 },
+        active: Compact(false),
+        kind: Compact(Kind::Enemy),
+    });
+
+    // Whole rows: each item is an EntityRef, with the #[soa_impl] methods.
+    for entity in entities.iter() {
+        println!("{}: {} J", entity.name, entity.kinetic_energy(2.0));
     }
+
+    // One column: only the name array is loaded.
+    for name in &entities.name {
+        println!("{name}");
+    }
+
+    // Nested fields are columns as well.
+    let total_x: f32 = entities.position.x.iter().sum();
+
+    // Several columns at once; `mut` yields mutable references.
+    for (mass, active) in soa_zip!(&mut entities, [mut mass, active]) {
+        if active.get() {
+            *mass += 1.0;
+        }
+    }
+
+    // Row access by index, like vec[i] and &mut vec[i].
+    entities.index_mut(0).scale_mass(2.0);
+    if entities.index(1).kind.get() == Kind::Enemy {
+        entities.index_mut(1).active.set(true);
+    }
+
+    // Packed columns scan whole words at a time.
+    let active = entities.active.count(true);
+    let enemies = entities.kind.count(Kind::Enemy);
+    println!("{active} active, {enemies} enemies, total x {total_x}");
 }
 ```
 
-`ParticleRef` holds references (`&T` rather than `T`), so the macro inserts
+`iter()` costs about the same as reading the fields by hand, because LLVM drops
+the loads for fields you never read in release builds. Borrowing one column is
+the struct-of-arrays payoff: only that array is touched. The
+[soa_zip!](https://docs.rs/layout/*/layout/macro.soa_zip.html) macro walks
+several columns together and can zip external iterators as well.
+
+### Generated types
+
+`#[derive(SOA)]` on `Entity` generates `EntityVec`, which has the same API as
+`Vec<Entity>` but stores one array per field:
+
+```rust
+struct EntityVec {
+    name: Column<String>,     // derefs to [String]
+    mass: Column<f32>,
+    position: PositionVec,    // #[nested_soa]: a struct of arrays itself
+    active: CompactVec<bool>, // bit-packed
+    kind: CompactVec<Kind>,
+}
+```
+
+The helper types mirror how you borrow an `Entity`:
+
+| Helper           | Stands in for   |
+| ---------------- | --------------- |
+| `EntitySlice`    | `&[Entity]`     |
+| `EntitySliceMut` | `&mut [Entity]` |
+| `EntityRef`      | `&Entity`       |
+| `EntityRefMut`   | `&mut Entity`   |
+
+Every derived struct implements the `SOA` trait, so `<Entity as SOA>::Type`
+names `EntityVec` in generic code.
+
+`#[layout(...)]` passes derives through to all generated types. To attach an
+attribute to a single one, use `#[soa_attr(Target, ...)]`, for example
+`#[soa_attr(Vec, cfg_attr(test, derive(PartialEq)))]`. `Target` is one of
+`Vec`, `Slice`, `SliceMut`, `Ref`, `RefMut`, `Ptr` or `PtrMut`.
+
+### Methods on rows (`#[soa_impl]`)
+
+`#[soa_impl]` copies an `impl` block onto the generated reference types:
+`&self` methods land on `EntityRef`, `&mut self` methods on `EntityRefMut`,
+and associated functions or `Self`-returning methods stay on `Entity` only.
+The reference types hold `&T` rather than `T`, so the macro inserts
 dereferences where a method reads or writes a field by value:
 
 | Source                | Generated                      |
@@ -107,58 +180,20 @@ dereferences where a method reads or writes a field by value:
 
 ### Compact columns (`Compact<T>`)
 
-A `bool` column costs a byte per row. A small enum costs four or eight.
-`Compact<T>` shrinks narrow columns to the minimum width: `bool` and one-bit
-enums take one bit, larger fieldless enums take 2 or 4.
+A `bool` column costs a byte per row and a small enum four or eight.
+`Compact<T>` shrinks such columns to the minimum width: `bool` and one-bit
+enums take one bit per row, larger fieldless enums two or four. A fieldless
+enum opts in with `#[derive(CompactRepr)]` and an unsigned `#[repr(uN)]`. The
+derive rejects variants that carry data, sizes storage from the largest
+discriminant, and refuses enums that need more than four bits, since at eight
+bits a packed column is no smaller than a plain one.
 
-```rust
-use layout::{Compact, CompactRepr, SOA};
-
-#[repr(u8)]
-#[derive(Clone, Copy, CompactRepr)]
-enum Kind { Player, Enemy, Projectile, Pickup } // 4 variants -> 2 bits
-
-#[derive(SOA)]
-struct Entity {
-    id: u32,
-    active: Compact<bool>,   // 1 bit per entity
-    kind: Compact<Kind>,     // 2 bits per entity
-}
-```
-
-A fieldless enum opts in with `#[derive(CompactRepr)]` and an unsigned
-`#[repr(uN)]`. The derive rejects enums whose variants carry data, and it sizes
-storage from the largest discriminant, so `{ A = 1, B = 255 }` uses eight bits.
-
-> **Keep the import names.** `#[derive(SOA)]` recognizes a compact column by
-> matching the path-segment name `Compact` / `CompactBool` (a proc-macro
-> limitation: derive macros see tokens, not resolved types). A renamed or
-> re-exported import — `use layout::Compact as Packed;` with a field
-> `Packed<bool>` — is **not** recognized and silently falls back to a plain
-> `Vec<Packed<bool>>` (full byte per element, no error, no warning). Use the
-> names `Compact` / `CompactBool` directly, or a fully-qualified path
-> (`::layout::Compact<bool>`) — both keep the last segment as `Compact`.
-
-Read and write through `get` and `set`:
-
-```rust
-let mut entities = EntityVec::new();
-entities.push(Entity { id: 0, active: Compact(true), kind: Compact(Kind::Player) });
-
-if entities.get(0).unwrap().active.get() {
-    entities.get_mut(0).unwrap().kind.set(Kind::Enemy);
-}
-
-// count a value across the whole column
-let active = entities.active.count(true);
-let enemies = entities.kind.count(Kind::Enemy);
-```
-
-`count` encodes the value once and scans the packed words. For one-bit types it
-lowers to `count_ones` / `count_zeros`, which LLVM turns into `POPCNT`. Counting
-the active flag over 100k entities takes ~1.6 µs versus ~4.9 µs for
-`Vec<bool>::iter().filter().count()`, and the column drops from ~97 KiB to
-~12 KiB.
+Read and write a packed field through `get` and `set`. A `CompactVec` also
+offers `count`, which encodes the value once and scans the packed words. For
+one-bit types it lowers to `count_ones` / `count_zeros`, which LLVM turns into
+`POPCNT`: counting the active flag over 100k entities takes ~1.6 us versus
+~4.9 us for `Vec<bool>::iter().filter().count()`, and the column drops from
+~97 KiB to ~12 KiB.
 
 Reach for `Compact<T>` when many rows carry a narrow flag or tag: entity active
 bits, tile or voxel types, collision layers, visibility masks. A packed column
@@ -167,42 +202,21 @@ that reads or writes the bit every iteration alongside other fields, because
 extracting one bit costs more than loading one byte. If a flag sits on your hot
 path, measure it with `cargo bench --bench game`.
 
-## Usage
-
-Add `#[derive(SOA)]` to each struct you want to convert. Pass extra traits for
-the generated types through `#[layout(...)]`:
-
-```rust
-#[derive(Debug, PartialEq, SOA)]
-#[layout(Debug, PartialEq)]
-pub struct Cheese {
-    pub smell: f64,
-    pub color: (f64, f64, f64),
-    pub with_mushrooms: bool,
-    pub name: String,
-}
-```
-
-To attach an attribute to a single generated type (say
-`#[cfg_attr(test, derive(PartialEq))]` on `CheeseVec`), use `#[soa_attr]`:
-
-```rust
-#[derive(Debug, PartialEq, SOA)]
-#[soa_attr(Vec, cfg_attr(test, derive(PartialEq)))]
-pub struct Cheese {
-    pub smell: f64,
-    pub color: (f64, f64, f64),
-    pub with_mushrooms: bool,
-    pub name: String,
-}
-```
+> **Keep the import names.** `#[derive(SOA)]` recognizes a compact column by
+> the path-segment name `Compact` / `CompactBool`, because derive macros see
+> tokens, not resolved types. A renamed import such as
+> `use layout::Compact as Packed;` with a field `Packed<bool>` is not
+> recognized and silently falls back to a plain column of `Packed<bool>`, a
+> full byte per element with no error or warning. Use the names `Compact` /
+> `CompactBool` directly, or a fully-qualified path such as
+> `::layout::Compact<bool>`.
 
 ### Serialization (`serde`)
 
 Enable the `serde` cargo feature and pass `Serialize, Deserialize` through
 `#[layout(...)]` to (de)serialize the generated `Vec` as a struct of arrays.
-Compact columns (`Compact<T>`, `CompactVec<T>`) round-trip as their decoded
-values; the feature works with `no_std` + `alloc`.
+Compact columns round-trip as their decoded values, and the feature works with
+`no_std` + `alloc`.
 
 ```toml
 [dependencies]
@@ -210,113 +224,26 @@ layout = { version = "0.2", features = ["serde"] }
 serde  = { version = "1", features = ["derive"] }
 ```
 
-```rust
-#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize, SOA)]
-#[layout(Clone, PartialEq, Serialize, Deserialize)]
-pub struct Entity {
-    pub id: u32,
-    pub active: Compact<bool>, // serializes as a bool array
-}
-// EntityVec serializes to: {"id":[1,2],"active":[true,false]}
+With `#[layout(Debug, Clone, PartialEq, Serialize, Deserialize)]` on the
+structs above (and `Serialize, Deserialize` derived on `Kind`), `EntityVec`
+serializes column by column:
+
+```json
+{"name":["hero","slime"],"mass":[80.0,12.0],"position":{"x":[0.0,4.0],"y":[0.0,1.0]},"active":[true,false],"kind":["Player","Enemy"]}
 ```
-
-The first argument picks the target type:
-
-| Token      | Generated type   |
-| ---------- | ---------------- |
-| `Vec`      | `CheeseVec`      |
-| `Slice`    | `CheeseSlice`    |
-| `SliceMut` | `CheeseSliceMut` |
-| `Ref`      | `CheeseRef`      |
-| `RefMut`   | `CheeseRefMut`   |
-| `Ptr`      | `CheesePtr`      |
-| `PtrMut`   | `CheesePtrMut`   |
 
 ## API and caveats
 
 The generated code carries its own documentation, so `cargo doc` renders every
-struct and function. In most cases you can swap `Vec<Cheese>` for `CheeseVec`.
+struct and function. In most cases you can swap `Vec<Entity>` for `EntityVec`.
 The exceptions come from how `Vec` leans on references and `Deref`.
 
-`CheeseVec` cannot implement `Deref<Target = CheeseSlice>`, because `Deref` must
-return a reference and `CheeseSlice` is not one. The same holds for `Index` and
-`IndexMut`, which would have to return `CheeseRef` / `CheeseRefMut`. You cannot
-index into a `CheeseVec`. A few methods come in two forms, and some calls need
-`as_ref()` or `as_mut()` to reach the slice type.
-
-## Iteration
-
-Iterate a `CheeseVec` like any collection:
-
-```rust
-let mut vec = CheeseVec::new();
-vec.push(Cheese::new("stilton"));
-vec.push(Cheese::new("brie"));
-
-for cheese in vec.iter() {
-    // each item is a CheeseRef that loads all fields
-    let typeof_cheese: CheeseRef = cheese;
-    println!("this is {}, with a smell power of {}", cheese.name, cheese.smell);
-}
-```
-
-`iter()` runs about as fast as reading the fields by hand: LLVM drops the loads
-for fields you don't read in release builds.
-
-The point of struct-of-arrays is loading only the fields you need. Borrow a
-single column:
-
-```rust
-for name in &vec.name {
-    let typeof_name: &String = name;
-    println!("got cheese {}", name);
-}
-```
-
-Walk several columns together with the
-[soa_zip!](https://docs.rs/layout/*/layout/macro.soa_zip.html) macro:
-
-```rust
-for (name, smell, color) in soa_zip!(vec, [name, mut smell, color]) {
-    println!("this is {}, with color {:#?}", name, color);
-    *smell += 1.0; // smell is a mutable reference
-}
-```
-
-## Nested struct of arrays
-
-Nest one struct-of-arrays inside another with `#[nested_soa]`:
-
-```rust
-#[derive(SOA)]
-pub struct Point {
-    x: f32,
-    y: f32,
-}
-
-#[derive(SOA)]
-pub struct Particle {
-    #[nested_soa]
-    point: Point,
-    mass: f32,
-}
-```
-
-This produces nested vectors rather than `Vec<Point>`:
-
-```rust
-pub struct PointVec {
-    x: Vec<f32>,
-    y: Vec<f32>,
-}
-
-pub struct ParticleVec {
-    point: PointVec,
-    mass: Vec<f32>,
-}
-```
-
-The helper types nest too: `PointSlice` lives inside `ParticleSlice`.
+`EntityVec` cannot implement `Deref<Target = EntitySlice>`, because `Deref` must
+return a reference and `EntitySlice` is not one. The same holds for `Index` and
+`IndexMut`, which would have to return `EntityRef` / `EntityRefMut`, so
+`entities[0]` does not compile; use `index(0)` / `index_mut(0)` or `get(0)` /
+`get_mut(0)` instead. A few methods come in two forms, and some calls need
+`as_slice()` or `as_mut_slice()` to reach the slice type.
 
 ## Benchmarks
 
