@@ -58,6 +58,45 @@ pub fn derive(input: &Input) -> TokenStream {
     // structs (whose `Ref<'a>` needs a PhantomData marker to use its lifetime).
     let ref_marker_init = input.ref_marker_init(false);
 
+    // Row operations on the column pointers, for the generated `retain`.
+    // Plain columns are raw `*mut T` and use the pointer primitives
+    // directly; compact and nested columns forward to the same-named
+    // helpers on their own pointer type.
+    let row_unchecked = input
+        .map_fields_nested_or(
+            |ident, _, _| quote! { self.#ident.__row_unchecked(i) },
+            |ident, _| quote! { &*self.#ident.add(i) },
+        )
+        .collect::<Vec<_>>();
+
+    let row_mut_unchecked = input
+        .map_fields_nested_or(
+            |ident, _, _| quote! { self.#ident.__row_mut_unchecked(i) },
+            |ident, _| quote! { &mut *self.#ident.add(i) },
+        )
+        .collect::<Vec<_>>();
+
+    let move_row = input
+        .map_fields_nested_or(
+            |ident, _, _| quote! { self.#ident.__move_row(src, dst) },
+            |ident, _| quote! { ::core::ptr::copy_nonoverlapping(self.#ident.add(src), self.#ident.add(dst), 1) },
+        )
+        .collect::<Vec<_>>();
+
+    let drop_row = input
+        .map_fields_nested_or(
+            |ident, _, _| quote! { self.#ident.__drop_row(i) },
+            |ident, _| quote! { ::core::ptr::drop_in_place(self.#ident.add(i)) },
+        )
+        .collect::<Vec<_>>();
+
+    let shift_rows = input
+        .map_fields_nested_or(
+            |ident, _, _| quote! { self.#ident.__shift_rows(src, dst, count) },
+            |ident, _| quote! { ::core::ptr::copy(self.#ident.add(src), self.#ident.add(dst), count) },
+        )
+        .collect::<Vec<_>>();
+
     quote! {
         /// An analog of a pointer to
         #[doc = #doc_url]
@@ -244,6 +283,84 @@ pub fn derive(input: &Input) -> TokenStream {
                 let mut val = ::core::mem::ManuallyDrop::new(val);
                 unsafe {
                     #(self.#fields_names.write(::core::ptr::read(&val.#fields_names));)*
+                }
+            }
+
+            // Row operations for the generated `retain`, which compacts
+            // every column through one set of column pointers read before
+            // its loop. Do not use these methods directly.
+
+            /// Borrow row `i` through these column pointers.
+            ///
+            /// # Safety
+            ///
+            /// Every column pointer must be valid for reads at `i` for `'a`.
+            #[doc(hidden)]
+            #[inline]
+            pub unsafe fn __row_unchecked<'a>(self, i: usize) -> #ref_name<'a> {
+                unsafe {
+                    #ref_name {
+                        #( #fields_names: #row_unchecked, )*
+                        #ref_marker_init
+                    }
+                }
+            }
+
+            /// Mutably borrow row `i` through these column pointers.
+            ///
+            /// # Safety
+            ///
+            /// Every column pointer must be valid for reads and writes at
+            /// `i` for `'a`, with no other live reference to that row.
+            #[doc(hidden)]
+            #[inline]
+            pub unsafe fn __row_mut_unchecked<'a>(self, i: usize) -> #ref_mut_name<'a> {
+                unsafe {
+                    #ref_mut_name {
+                        #( #fields_names: #row_mut_unchecked, )*
+                    }
+                }
+            }
+
+            /// Move row `src` into slot `dst` bitwise, leaving `src` as a
+            /// moved-out hole.
+            ///
+            /// # Safety
+            ///
+            /// `src != dst`, row `src` must be initialized and slot `dst`
+            /// must not hold a live row.
+            #[doc(hidden)]
+            #[inline]
+            pub unsafe fn __move_row(self, src: usize, dst: usize) {
+                unsafe {
+                    #( #move_row; )*
+                }
+            }
+
+            /// Drop row `i` in place, leaving a hole.
+            ///
+            /// # Safety
+            ///
+            /// Row `i` must be initialized and must not be used again.
+            #[doc(hidden)]
+            #[inline]
+            pub unsafe fn __drop_row(self, i: usize) {
+                unsafe {
+                    #( #drop_row; )*
+                }
+            }
+
+            /// Move `count` rows from `src` to `dst` (the ranges may
+            /// overlap), leaving the vacated slots as holes.
+            ///
+            /// # Safety
+            ///
+            /// Rows `src..src + count` must be initialized and the
+            /// destination range must lie within every column's buffer.
+            #[doc(hidden)]
+            pub unsafe fn __shift_rows(self, src: usize, dst: usize, count: usize) {
+                unsafe {
+                    #( #shift_rows; )*
                 }
             }
         }

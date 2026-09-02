@@ -185,6 +185,22 @@ impl<T> Column<T> {
         self.inner.truncate(len);
     }
 
+    /// Set the length without touching any element (forwards to
+    /// [`Vec::set_len`]).
+    ///
+    /// # Safety
+    ///
+    /// As for [`Vec::set_len`]: `new_len` must not exceed the capacity and
+    /// the first `new_len` elements must be initialized. See also
+    /// [`Column::push`]: the caller must set every sibling column to the
+    /// same length.
+    #[inline]
+    pub unsafe fn set_len(&mut self, new_len: usize) {
+        // SAFETY: forwarded to `Vec::set_len`; the caller upholds its
+        // contract.
+        unsafe { self.inner.set_len(new_len) }
+    }
+
     /// Resize to `new_len`, filling new slots with `value` (forwards to
     /// [`Vec::resize`]).
     ///

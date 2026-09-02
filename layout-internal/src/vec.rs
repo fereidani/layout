@@ -85,30 +85,16 @@ pub fn derive(input: &Input) -> TokenStream {
         )
         .collect::<Vec<_>>();
 
-    // `retain` and `retain_mut` compact in place identically; they differ
-    // only in the accessor building the handle handed to the predicate.
-    let retain_body = |accessor: TokenStream| {
-        quote! {
-            let mut slice = self.as_mut_slice();
-            let len = slice.len();
-            let mut write_idx = 0;
+    // `retain` and `retain_mut` share one compaction loop (`__retain_rows`);
+    // they differ only in the row handle handed to the predicate.
+    let retain_guard_name = quote::format_ident!("{}RetainGuard", name);
 
-            for read_idx in 0..len {
-                if f(slice.#accessor(read_idx).unwrap()) {
-                    if write_idx != read_idx {
-                        slice.swap(write_idx, read_idx);
-                    }
-                    write_idx += 1;
-                }
-            }
-
-            if write_idx < len {
-                self.truncate(write_idx);
-            }
-        }
-    };
-    let retain = retain_body(quote! { get });
-    let retain_mut = retain_body(quote! { get_mut });
+    let set_len_fields = input
+        .map_fields_nested_or(
+            |ident, _, _| quote! { self.#ident.__set_len(len) },
+            |ident, _| quote! { self.#ident.set_len(len) },
+        )
+        .collect::<Vec<_>>();
 
     let mut generated = quote! {
         /// An analog to `
@@ -372,15 +358,161 @@ pub fn derive(input: &Input) -> TokenStream {
             #[doc = #vec_name_str]
             /// ::retain()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.retain).
             pub fn retain<F>(&mut self, mut f: F) where F: FnMut(#ref_name) -> bool {
-                #retain
+                // SAFETY: `__retain_rows` only asks for rows below the length
+                // that are still live.
+                self.__retain_rows(|ptrs, i| f(unsafe { ptrs.__row_unchecked(i) }));
             }
 
             /// Similar to [`
             #[doc = #vec_name_str]
             /// ::retain_mut()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.retain_mut).
             pub fn retain_mut<F>(&mut self, mut f: F) where F: FnMut(#ref_mut_name) -> bool {
-                #retain_mut
+                // SAFETY: as in `retain`; the row handle is dropped before
+                // the loop touches that row again.
+                self.__retain_rows(|ptrs, i| f(unsafe { ptrs.__row_mut_unchecked(i) }));
             }
+
+            /// Shared body of `retain` and `retain_mut`: keep the rows for
+            /// which `f` (given the column pointers and a row index) returns
+            /// `true`, moving them towards the front.
+            ///
+            /// This is `Vec::retain_mut`'s write-index compaction, applied to
+            /// every column at once:
+            ///
+            /// ```text
+            /// rows: [Kept, Kept, Hole, Hole, Hole, Hole, Unchecked, Unchecked]
+            ///       |            ^- write                ^- read             |
+            ///       |<-              original_len                          ->|
+            /// ```
+            ///
+            /// Kept rows before the first rejection are never written. A
+            /// rejected row is dropped in place; a kept row after the first
+            /// rejection is moved down into the hole with one copy per
+            /// column; every column's length is set once at the end. If the
+            /// predicate or a destructor panics inside the critical section,
+            /// the guard shifts the unchecked rows down over the holes and
+            /// sets the length, so no row is dropped twice or leaked.
+            fn __retain_rows<F>(&mut self, mut f: F)
+            where
+                F: FnMut(&#ptr_mut_name, usize) -> bool,
+            {
+                let original_len = self.len();
+                if original_len == 0 {
+                    return;
+                }
+                // The guard takes the vector first: a compact column's
+                // pointer addresses the column's store inside this struct,
+                // so the pointers below must be derived after the last
+                // unique reborrow of the vector, and the loops never touch
+                // `g.vec` again. With `read == write == 0` the guard's drop
+                // restores the original length unchanged.
+                let mut g = #retain_guard_name {
+                    vec: self,
+                    read: 0,
+                    write: 0,
+                    original_len,
+                };
+                // Column base pointers, read once: nothing below grows a
+                // column, so no buffer can move while they are in use.
+                let ptrs = g.vec.as_mut_ptr();
+
+                let mut read = 0;
+                loop {
+                    if ::layout::branches::unlikely(!f(&ptrs, read)) {
+                        break;
+                    }
+                    read += 1;
+                    if read == original_len {
+                        // Every row is kept: nothing to move or drop.
+                        ::core::mem::forget(g);
+                        return;
+                    }
+                }
+
+                // Critical section: at least one row is removed from here
+                // on. `read` is advanced past the rejected row before it is
+                // dropped, so a panicking destructor cannot make the guard
+                // drop it again.
+                g.write = read;
+                g.read = read + 1;
+                // SAFETY: `read < original_len`, and the row was rejected.
+                unsafe { ptrs.__drop_row(read) };
+
+                while g.read < g.original_len {
+                    let cur = g.read;
+                    if !f(&ptrs, cur) {
+                        g.read += 1;
+                        // SAFETY: row `cur` is live, was rejected, and is
+                        // never touched again.
+                        unsafe { ptrs.__drop_row(cur) };
+                    } else {
+                        // SAFETY: `read > write`, so the slots do not
+                        // overlap; the source row is never touched again.
+                        unsafe { ptrs.__move_row(cur, g.write) };
+                        g.write += 1;
+                        g.read += 1;
+                    }
+                }
+
+                // Leaving the critical section without a panic: commit the
+                // length and disarm the guard.
+                // SAFETY: rows `[0, write)` are live and contiguous.
+                unsafe { g.vec.__set_len(g.write) };
+                ::core::mem::forget(g);
+            }
+
+            /// Set every column's length to `len` without touching any
+            /// element. Do not use this method directly.
+            ///
+            /// # Safety
+            ///
+            /// `len` must not exceed any column's capacity, and the first
+            /// `len` rows must be initialized.
+            #[doc(hidden)]
+            pub unsafe fn __set_len(&mut self, len: usize) {
+                unsafe {
+                    #( #set_len_fields; )*
+                }
+            }
+        }
+
+        /// Panic guard of `retain`: runs only when the predicate or a
+        /// destructor unwinds inside the critical section. It shifts the
+        /// unchecked rows down over the holes and sets the final length.
+        #[doc(hidden)]
+        struct #retain_guard_name<'a> {
+            vec: &'a mut #vec_name,
+            /// First unchecked row.
+            read: usize,
+            /// First hole: every row below it is kept.
+            write: usize,
+            original_len: usize,
+        }
+
+        impl Drop for #retain_guard_name<'_> {
+            #[cold]
+            fn drop(&mut self) {
+                let remaining = self.original_len - self.read;
+                // SAFETY: rows `[read, original_len)` are live and were
+                // never touched, and `write <= read`, so the shift moves
+                // live rows over holes only.
+                unsafe {
+                    self.vec.as_mut_ptr().__shift_rows(
+                        self.read,
+                        self.write,
+                        remaining,
+                    );
+                }
+                // SAFETY: the kept rows are now contiguous in
+                // `[0, write + remaining)`.
+                unsafe {
+                    self.vec.__set_len(self.write + remaining);
+                }
+            }
+        }
+
+        #[allow(dead_code)]
+        impl #vec_name {
 
             /// Similar to [`
             #[doc = #vec_name_str]

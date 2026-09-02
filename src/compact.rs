@@ -648,6 +648,21 @@ impl<T: CompactRepr> CompactVec<T> {
         self.inner.truncate(len);
     }
 
+    /// Shorten the column to `len` lanes. Used by the generated `retain`,
+    /// which compacts every column in place and then fixes all their
+    /// lengths at once; `unsafe` only so that it can be called uniformly
+    /// alongside the plain columns' `set_len`.
+    ///
+    /// # Safety
+    ///
+    /// `len <= self.len()`.
+    #[doc(hidden)]
+    #[inline]
+    pub unsafe fn __set_len(&mut self, len: usize) {
+        debug_assert!(len <= self.inner.len());
+        self.inner.truncate(len);
+    }
+
     /// Resizes the column to `new_len`, pushing copies of `value` to grow or
     /// truncating to shrink (analogous to [`Vec::resize`]).
     pub fn resize(&mut self, new_len: usize, value: impl Into<Compact<T>>) {
@@ -2154,6 +2169,80 @@ impl<T: CompactRepr> CompactPtrMut<T> {
             // SAFETY: the caller guarantees `index` addresses a writable
             // element of the live storage.
             (*self.packed).set_unchecked(self.index, T::encode(val.0));
+        }
+    }
+
+    // Row operations for the generated `retain`, which compacts every
+    // column through its column pointer (`Vec::as_mut_ptr`, so always
+    // storage-backed). Lanes are `Copy` and have no destructor, so a move
+    // is a lane copy and a drop is a no-op.
+
+    /// Read the element `i` lanes past this pointer.
+    ///
+    /// # Safety
+    ///
+    /// The pointer must be storage-backed and `index + i` must address an
+    /// initialized lane.
+    #[doc(hidden)]
+    #[inline(always)]
+    pub unsafe fn __row_unchecked(self, i: usize) -> Compact<T> {
+        // SAFETY: forwarded contract.
+        unsafe { self.add(i).read() }
+    }
+
+    /// Mutable handle to the element `i` lanes past this pointer.
+    ///
+    /// # Safety
+    ///
+    /// As [`__row_unchecked`](Self::__row_unchecked); the storage must
+    /// outlive `'a` and no other handle to the lane may be live.
+    #[doc(hidden)]
+    #[inline(always)]
+    pub unsafe fn __row_mut_unchecked<'a>(
+        self,
+        i: usize,
+    ) -> CompactRefMut<'a, T> {
+        // SAFETY: forwarded contract.
+        unsafe { CompactRefMut::from_packed_ptr(self.packed, self.index + i) }
+    }
+
+    /// Copy the lane at `src` to `dst` (both relative to this pointer).
+    ///
+    /// # Safety
+    ///
+    /// The pointer must be storage-backed and both lanes must be backed by
+    /// allocated words.
+    #[doc(hidden)]
+    #[inline(always)]
+    pub unsafe fn __move_row(self, src: usize, dst: usize) {
+        // SAFETY: forwarded contract.
+        unsafe {
+            let value = self.add(src).read();
+            self.add(dst).write(value);
+        }
+    }
+
+    /// Drop the lane at `i`: nothing to do for a `Copy` lane.
+    #[doc(hidden)]
+    #[inline(always)]
+    pub unsafe fn __drop_row(self, _i: usize) {}
+
+    /// Move `count` lanes from `src` down to `dst` (relative to this
+    /// pointer); the ranges may overlap.
+    ///
+    /// # Safety
+    ///
+    /// The pointer must be storage-backed and both ranges must lie within
+    /// the store's length.
+    #[doc(hidden)]
+    pub unsafe fn __shift_rows(self, src: usize, dst: usize, count: usize) {
+        // SAFETY: forwarded contract.
+        unsafe {
+            (*self.packed).copy_lanes(
+                self.index + src,
+                self.index + dst,
+                count,
+            );
         }
     }
 }
