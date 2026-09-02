@@ -15,17 +15,25 @@ pub fn derive(input: &Input) -> TokenStream {
     let chunks_name = names::chunks_name(&input.name);
     let chunks_exact_name = names::chunks_exact_name(&input.name);
 
+    // The chunk iterators keep their cursor state next to one field per
+    // column, so the state fields get hygienic names that cannot collide
+    // with a user field called `pos`, `end` or `chunk_size`.
+    let pos = Ident::new("___layout_private_pos", Span::call_site());
+    let chunk_size =
+        Ident::new("___layout_private_chunk_size", Span::call_site());
+    let end_field = Ident::new("___layout_private_end", Span::call_site());
+
     let slice_chunk_fields = input
         .map_fields_nested_or(
-            |ident, _, _| quote! { self.#ident.slice(self.pos..end) },
-            |ident, _| quote! { &self.#ident[self.pos..end] },
+            |ident, _, _| quote! { self.#ident.slice(self.#pos..end) },
+            |ident, _| quote! { &self.#ident[self.#pos..end] },
         )
         .collect::<Vec<_>>();
 
     let slice_chunks_exact_fields = input
         .map_fields_nested_or(
-            |ident, _, _| quote! { self.#ident.slice(self.pos..chunk_end) },
-            |ident, _| quote! { &self.#ident[self.pos..chunk_end] },
+            |ident, _, _| quote! { self.#ident.slice(self.#pos..chunk_end) },
+            |ident, _| quote! { &self.#ident[self.#pos..chunk_end] },
         )
         .collect::<Vec<_>>();
 
@@ -326,8 +334,8 @@ pub fn derive(input: &Input) -> TokenStream {
                 assert!(chunk_size != 0, "chunk size must be non-zero");
                 #chunks_name {
                     #( #fields_names: self.#fields_names, )*
-                    chunk_size,
-                    pos: 0,
+                    #chunk_size: chunk_size,
+                    #pos: 0,
                 }
             }
 
@@ -340,9 +348,9 @@ pub fn derive(input: &Input) -> TokenStream {
                 let end = self.len() - rem;
                 #chunks_exact_name {
                     #( #fields_names: self.#fields_names, )*
-                    chunk_size,
-                    pos: 0,
-                    end,
+                    #chunk_size: chunk_size,
+                    #pos: 0,
+                    #end_field: end,
                 }
             }
         }
@@ -351,8 +359,8 @@ pub fn derive(input: &Input) -> TokenStream {
         #[allow(missing_debug_implementations)]
         #visibility struct #chunks_name<'a> {
             #( #fields_names: #slice_fields_types, )*
-            chunk_size: usize,
-            pos: usize,
+            #chunk_size: usize,
+            #pos: usize,
         }
 
         #[allow(dead_code)]
@@ -362,25 +370,25 @@ pub fn derive(input: &Input) -> TokenStream {
             #[inline]
             fn next(&mut self) -> Option<#slice_name<'a>> {
                 let len = self.#first_field.len();
-                if self.pos >= len || self.chunk_size == 0 {
+                if self.#pos >= len || self.#chunk_size == 0 {
                     return None;
                 }
-                let end = (self.pos + self.chunk_size).min(len);
+                let end = (self.#pos + self.#chunk_size).min(len);
                 let result = #slice_name {
                     #( #fields_names: #slice_chunk_fields, )*
                 };
-                self.pos = end;
+                self.#pos = end;
                 Some(result)
             }
 
             #[inline]
             fn size_hint(&self) -> (usize, Option<usize>) {
-                if self.chunk_size == 0 {
+                if self.#chunk_size == 0 {
                     return (0, Some(0));
                 }
-                let remaining = self.#first_field.len().saturating_sub(self.pos);
+                let remaining = self.#first_field.len().saturating_sub(self.#pos);
                 let count =
-                    remaining / self.chunk_size + usize::from(remaining % self.chunk_size != 0);
+                    remaining / self.#chunk_size + usize::from(remaining % self.#chunk_size != 0);
                 (count, Some(count))
             }
 
@@ -397,9 +405,9 @@ pub fn derive(input: &Input) -> TokenStream {
         #[allow(missing_debug_implementations)]
         #visibility struct #chunks_exact_name<'a> {
             #( #fields_names: #slice_fields_types, )*
-            chunk_size: usize,
-            pos: usize,
-            end: usize,
+            #chunk_size: usize,
+            #pos: usize,
+            #end_field: usize,
         }
 
         #[allow(dead_code)]
@@ -408,24 +416,24 @@ pub fn derive(input: &Input) -> TokenStream {
 
             #[inline]
             fn next(&mut self) -> Option<#slice_name<'a>> {
-                if self.pos >= self.end || self.chunk_size == 0 {
+                if self.#pos >= self.#end_field || self.#chunk_size == 0 {
                     return None;
                 }
-                let chunk_end = self.pos + self.chunk_size;
+                let chunk_end = self.#pos + self.#chunk_size;
                 let result = #slice_name {
                     #( #fields_names: #slice_chunks_exact_fields, )*
                 };
-                self.pos = chunk_end;
+                self.#pos = chunk_end;
                 Some(result)
             }
 
             #[inline]
             fn size_hint(&self) -> (usize, Option<usize>) {
-                if self.chunk_size == 0 {
+                if self.#chunk_size == 0 {
                     return (0, Some(0));
                 }
-                let remaining = self.end.saturating_sub(self.pos);
-                let count = remaining / self.chunk_size;
+                let remaining = self.#end_field.saturating_sub(self.#pos);
+                let count = remaining / self.#chunk_size;
                 (count, Some(count))
             }
 
@@ -439,7 +447,7 @@ pub fn derive(input: &Input) -> TokenStream {
         impl<'a> #chunks_exact_name<'a> {
             /// Returns the remainder of the original slice not yielded by the iterator.
             pub fn remainder(&self) -> #slice_name<'a> {
-                let rem_start = self.end.min(self.#first_field.len());
+                let rem_start = self.#end_field.min(self.#first_field.len());
                 #slice_name {
                     #( #fields_names: #slice_chunks_exact_remainder_fields, )*
                 }
@@ -601,6 +609,11 @@ pub fn derive_mut(input: &Input) -> TokenStream {
 
     let fields_names_len =
         Ident::new("___layout_private_len", Span::call_site());
+    // Hygienic cursor state for the mutable chunk iterators (see `derive`).
+    let pos = Ident::new("___layout_private_pos", Span::call_site());
+    let chunk_size =
+        Ident::new("___layout_private_chunk_size", Span::call_site());
+    let end_field = Ident::new("___layout_private_end", Span::call_site());
 
     // Raw pointer field types for mutable chunk iterators.
     // Storing raw pointers instead of &mut [T] avoids creating overlapping
@@ -622,16 +635,16 @@ pub fn derive_mut(input: &Input) -> TokenStream {
                 |ident, field_type, compact| {
                     let slice_mut_type =
                         names::nested_slice_mut_ty(field_type, compact);
-                    quote! { unsafe { <#slice_mut_type>::from_raw_parts_mut(self.#ident.add(self.pos), #len) } }
+                    quote! { unsafe { <#slice_mut_type>::from_raw_parts_mut(self.#ident.add(self.#pos), #len) } }
                 },
-                |ident, _| quote! { unsafe { ::core::slice::from_raw_parts_mut(self.#ident.add(self.pos), #len) } },
+                |ident, _| quote! { unsafe { ::core::slice::from_raw_parts_mut(self.#ident.add(self.#pos), #len) } },
             )
             .collect::<Vec<_>>()
     };
 
     let chunks_mut_next_fields = chunk_from_ptr(quote! { chunk_len });
     let chunks_exact_mut_next_fields =
-        chunk_from_ptr(quote! { self.chunk_size });
+        chunk_from_ptr(quote! { self.#chunk_size });
 
     let chunks_exact_mut_remainder_fields = input
         .map_fields_nested_or(
@@ -1119,8 +1132,8 @@ pub fn derive_mut(input: &Input) -> TokenStream {
             #visibility struct #chunks_mut_name<'a> {
                 #( #fields_names: #chunks_mut_ptr_fields_types, )*
                 #fields_names_len: usize,
-                chunk_size: usize,
-                pos: usize,
+                #chunk_size: usize,
+                #pos: usize,
                 _marker: ::core::marker::PhantomData<&'a mut #name>,
             }
 
@@ -1130,27 +1143,27 @@ pub fn derive_mut(input: &Input) -> TokenStream {
 
                 #[inline]
                 fn next(&mut self) -> Option<#slice_mut_name<'a>> {
-                    if self.pos >= self.#fields_names_len || self.chunk_size == 0 {
+                    if self.#pos >= self.#fields_names_len || self.#chunk_size == 0 {
                         return None;
                     }
-                    let end = (self.pos + self.chunk_size).min(self.#fields_names_len);
-                    let chunk_len = end - self.pos;
+                    let end = (self.#pos + self.#chunk_size).min(self.#fields_names_len);
+                    let chunk_len = end - self.#pos;
                     let result = #slice_mut_name {
                         #( #fields_names: #chunks_mut_next_fields, )*
                     };
-                    self.pos = end;
+                    self.#pos = end;
                     Some(result)
                 }
 
                 #[inline]
                 fn size_hint(&self) -> (usize, Option<usize>) {
-                    if self.chunk_size == 0 {
+                    if self.#chunk_size == 0 {
                         return (0, Some(0));
                     }
-                    let remaining = self.#fields_names_len.saturating_sub(self.pos);
+                    let remaining = self.#fields_names_len.saturating_sub(self.#pos);
                     let count =
-                        remaining / self.chunk_size
-                            + usize::from(remaining % self.chunk_size != 0);
+                        remaining / self.#chunk_size
+                            + usize::from(remaining % self.#chunk_size != 0);
                     (count, Some(count))
                 }
 
@@ -1168,9 +1181,9 @@ pub fn derive_mut(input: &Input) -> TokenStream {
             #visibility struct #chunks_exact_mut_name<'a> {
                 #( #fields_names: #chunks_mut_ptr_fields_types, )*
                 #fields_names_len: usize,
-                chunk_size: usize,
-                pos: usize,
-                end: usize,
+                #chunk_size: usize,
+                #pos: usize,
+                #end_field: usize,
                 _marker: ::core::marker::PhantomData<&'a mut #name>,
             }
 
@@ -1180,23 +1193,23 @@ pub fn derive_mut(input: &Input) -> TokenStream {
 
                 #[inline]
                 fn next(&mut self) -> Option<#slice_mut_name<'a>> {
-                    if self.pos >= self.end || self.chunk_size == 0 {
+                    if self.#pos >= self.#end_field || self.#chunk_size == 0 {
                         return None;
                     }
                     let result = #slice_mut_name {
                         #( #fields_names: #chunks_exact_mut_next_fields, )*
                     };
-                    self.pos += self.chunk_size;
+                    self.#pos += self.#chunk_size;
                     Some(result)
                 }
 
                 #[inline]
                 fn size_hint(&self) -> (usize, Option<usize>) {
-                    if self.chunk_size == 0 {
+                    if self.#chunk_size == 0 {
                         return (0, Some(0));
                     }
-                    let remaining = self.end.saturating_sub(self.pos);
-                    let count = remaining / self.chunk_size;
+                    let remaining = self.#end_field.saturating_sub(self.#pos);
+                    let count = remaining / self.#chunk_size;
                     (count, Some(count))
                 }
 
@@ -1210,7 +1223,7 @@ pub fn derive_mut(input: &Input) -> TokenStream {
             impl<'a> #chunks_exact_mut_name<'a> {
                 /// Returns the remainder of the original slice not yielded by the iterator.
                 pub fn into_remainder(self) -> #slice_mut_name<'a> {
-                    let rem_start = self.end.min(self.#fields_names_len);
+                    let rem_start = self.#end_field.min(self.#fields_names_len);
                     let rem_len = self.#fields_names_len - rem_start;
                     #slice_mut_name {
                         #( #fields_names: #chunks_exact_mut_remainder_fields, )*
@@ -1232,8 +1245,8 @@ pub fn derive_mut(input: &Input) -> TokenStream {
                     #chunks_mut_name {
                         #( #fields_names: self.#fields_names.as_mut_ptr(), )*
                         #fields_names_len,
-                        chunk_size,
-                        pos: 0,
+                        #chunk_size: chunk_size,
+                        #pos: 0,
                         _marker: ::core::marker::PhantomData,
                     }
                 }
@@ -1252,9 +1265,9 @@ pub fn derive_mut(input: &Input) -> TokenStream {
                     #chunks_exact_mut_name {
                         #( #fields_names: self.#fields_names.as_mut_ptr(), )*
                         #fields_names_len,
-                        chunk_size,
-                        pos: 0,
-                        end,
+                        #chunk_size: chunk_size,
+                        #pos: 0,
+                        #end_field: end,
                         _marker: ::core::marker::PhantomData,
                     }
                 }
