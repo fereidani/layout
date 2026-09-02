@@ -277,10 +277,13 @@ pub fn derive(input: &Input) -> TokenStream {
                 if ::layout::branches::unlikely(self.is_empty()) {
                     None
                 } else {
-                    // SAFETY: every column is popped once.
+                    // SAFETY: every column is popped once, and the columns
+                    // share one length that was just checked to be non-zero,
+                    // so no `pop` returns `None`.
                     #(
-                        let #fields_names_hygienic =
-                            unsafe { self.#fields_names.pop().unwrap() };
+                        let #fields_names_hygienic = unsafe {
+                            self.#fields_names.pop().unwrap_unchecked()
+                        };
                     )*
                     Some(#name{#(#fields_names: #fields_names_hygienic),*})
                 }

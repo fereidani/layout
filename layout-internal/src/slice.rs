@@ -806,6 +806,7 @@ pub fn derive_mut(input: &Input) -> TokenStream {
             /// Similar to [`&mut
             #[doc = #slice_name_str]
             /// ::swap()`](https://doc.rust-lang.org/std/primitive.slice.html#method.swap).
+            #[inline]
             pub fn swap(&mut self, a: usize, b: usize) {
                 let len = self.len();
                 if ::layout::branches::unlikely(a >= len) {
