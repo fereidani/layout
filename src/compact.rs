@@ -1675,6 +1675,46 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
         }
     }
 
+    /// Reorder the slice so that position `pos` receives the element that
+    /// was at `argsort[pos]`, without validating `argsort`. Generated
+    /// composite sorts validate once and then call this per column.
+    ///
+    /// The lanes are gathered into a fresh store in sorted order and copied
+    /// back in one word-level pass; the gather's loads are independent, so
+    /// this streams where an in-place cycle walk would chase one cache miss
+    /// after another.
+    ///
+    /// # Safety
+    ///
+    /// `argsort` must be a permutation of `0..self.len()`.
+    #[doc(hidden)]
+    pub unsafe fn __private_apply_argsort_unchecked(
+        &mut self,
+        argsort: &[usize],
+    ) {
+        let len = self.len;
+        debug_assert_eq!(argsort.len(), len);
+        if len <= 1 {
+            return;
+        }
+        let start = self.start;
+        let mut sorted = Store::<T>::with_capacity(len);
+        {
+            // SAFETY: `len > 0` implies live storage, and every `src < len`
+            // per the caller's permutation contract, so every lane read is
+            // within the slice.
+            let pa = unsafe { &*self.packed };
+            sorted.extend_lanes(
+                argsort
+                    .iter()
+                    .map(|&src| unsafe { pa.get_unchecked(start + src) }),
+            );
+        }
+        // SAFETY: as above; the shared borrow has ended.
+        let pa = unsafe { &mut *self.packed };
+        pa.copy_from_packed(&sorted, 0, start, len);
+    }
+
     pub fn iter(&self) -> CompactIter<'_, T> {
         CompactIter::new(
             self.packed as *const Store<T>,

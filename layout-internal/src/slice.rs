@@ -607,6 +607,13 @@ pub fn derive_mut(input: &Input) -> TokenStream {
         )
         .collect::<Vec<_>>();
 
+    let apply_argsort_unchecked = input
+        .map_fields_nested_or(
+            |ident, _, _| quote! { self.#ident.__private_apply_argsort_unchecked(argsort) },
+            |ident, _| quote! { ::layout::__apply_argsort_unchecked(&mut self.#ident, argsort) },
+        )
+        .collect::<Vec<_>>();
+
     let fields_names_len =
         Ident::new("___layout_private_len", Span::call_site());
     // Hygienic cursor state for the mutable chunk iterators (see `derive`).
@@ -963,6 +970,21 @@ pub fn derive_mut(input: &Input) -> TokenStream {
                 #( #apply_permutation_unchecked; )*
             }
 
+            #[doc(hidden)]
+            /// Reorder every column so that position `pos` receives the row
+            /// that was at `argsort[pos]`, without validating `argsort`. Do
+            /// not use this method directly.
+            ///
+            /// # Safety
+            ///
+            /// `argsort` must be a permutation of `0..self.len()`.
+            pub unsafe fn __private_apply_argsort_unchecked(
+                &mut self,
+                argsort: &[usize],
+            ) {
+                #( #apply_argsort_unchecked; )*
+            }
+
             /// Similar to [`&mut
             #[doc = #slice_name_str]
             /// ::sort_by()`](https://doc.rust-lang.org/std/primitive.slice.html#method.sort_by).
@@ -982,12 +1004,10 @@ pub fn derive_mut(input: &Input) -> TokenStream {
                     f(self.index(*j), self.index(*k)).then_with(|| j.cmp(k))
                 });
 
-                let dest = ::layout::__argsort_to_dest(&permutation);
-                let mut visited = ::layout::VisitedBits::new(len);
                 // SAFETY: `permutation` is `0..len` reordered by the sort, so
-                // `dest` is a permutation of `0..len` by construction.
+                // it is a permutation of `0..len` by construction.
                 unsafe {
-                    self.__private_apply_permutation_unchecked(&dest, &mut visited);
+                    self.__private_apply_argsort_unchecked(&permutation);
                 }
             }
 
@@ -1012,13 +1032,15 @@ pub fn derive_mut(input: &Input) -> TokenStream {
                 let mut keyed: Vec<(K, usize)> =
                     (0..len).map(|i| (f(self.index(i)), i)).collect();
                 keyed.sort_unstable_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+                let permutation: Vec<usize> =
+                    keyed.iter().map(|&(_, i)| i).collect();
+                drop(keyed);
 
-                let dest = ::layout::__keyed_to_dest(&keyed);
-                let mut visited = ::layout::VisitedBits::new(len);
                 // SAFETY: the pair indices are `0..len` reordered by the sort,
-                // so `dest` is a permutation of `0..len` by construction.
+                // so `permutation` is a permutation of `0..len` by
+                // construction.
                 unsafe {
-                    self.__private_apply_permutation_unchecked(&dest, &mut visited);
+                    self.__private_apply_argsort_unchecked(&permutation);
                 }
             }
         }
@@ -1041,12 +1063,10 @@ pub fn derive_mut(input: &Input) -> TokenStream {
                     self.index(*j).cmp(&self.index(*k)).then_with(|| j.cmp(k))
                 });
 
-                let dest = ::layout::__argsort_to_dest(&permutation);
-                let mut visited = ::layout::VisitedBits::new(len);
                 // SAFETY: `permutation` is `0..len` reordered by the sort, so
-                // `dest` is a permutation of `0..len` by construction.
+                // it is a permutation of `0..len` by construction.
                 unsafe {
-                    self.__private_apply_permutation_unchecked(&dest, &mut visited);
+                    self.__private_apply_argsort_unchecked(&permutation);
                 }
             }
         }

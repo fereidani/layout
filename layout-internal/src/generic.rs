@@ -164,19 +164,13 @@ pub fn derive_slice_mut(input: &Input) -> TokenStream {
 
             #[inline]
             fn apply_index(&mut self, indices: &[usize]) {
-                assert!(
-                    indices.len() == self.len(),
-                    "permutation length {} does not match slice length {}",
-                    indices.len(),
-                    self.len()
-                );
-                let dest = ::layout::__invert_permutation(indices);
-                let mut visited = ::layout::VisitedBits::new(dest.len());
-                // SAFETY: the length was asserted above and
-                // `__invert_permutation` validated `indices` as a
-                // permutation, so `dest` is a permutation of `0..len`.
+                // The returned scratch bitmap is only needed by the cycle
+                // walk; the gather below works from `indices` directly.
+                let _ = ::layout::__validate_permutation(indices, self.len());
+                // SAFETY: `indices` was just validated as a permutation of
+                // `0..len`.
                 unsafe {
-                    self.__private_apply_permutation_unchecked(&dest, &mut visited);
+                    self.__private_apply_argsort_unchecked(indices);
                 }
             }
 
