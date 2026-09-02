@@ -500,20 +500,18 @@ impl<T: CompactRepr> core::iter::FromIterator<Compact<T>> for CompactVec<T> {
         // Lower bound like `std`'s `collect`: a filter's upper bound is the
         // source length, so reserving it over-allocates the packed store.
         let mut result = CompactVec::<T>::with_capacity(iterator.size_hint().0);
-        for item in iterator {
-            result.push(item);
-        }
+        result
+            .inner
+            .extend_lanes(iterator.map(|item| T::encode(item.0)));
         result
     }
 }
 
 impl<T: CompactRepr> core::iter::Extend<Compact<T>> for CompactVec<T> {
     fn extend<I: IntoIterator<Item = Compact<T>>>(&mut self, iter: I) {
-        let iterator = iter.into_iter();
-        self.reserve(iterator.size_hint().0);
-        for item in iterator {
-            self.push(item);
-        }
+        // Lanes are packed a word at a time; see `PackedArray::extend_lanes`.
+        self.inner
+            .extend_lanes(iter.into_iter().map(|item| T::encode(item.0)));
     }
 }
 
@@ -872,9 +870,7 @@ impl<T: CompactRepr> CompactVec<T> {
         // range).
         let iterator = replace_with.into_iter();
         let mut replacement = Store::<T>::with_capacity(iterator.size_hint().0);
-        for item in iterator {
-            replacement.push(T::encode(item.0));
-        }
+        replacement.extend_lanes(iterator.map(|item| T::encode(item.0)));
         let insert_count = replacement.len();
         if insert_count < remove_count {
             let tail_len = self.inner.len() - end;
@@ -882,22 +878,16 @@ impl<T: CompactRepr> CompactVec<T> {
             self.inner
                 .truncate(self.inner.len() - (remove_count - insert_count));
         } else {
-            for _ in 0..insert_count - remove_count {
-                self.inner.push(0);
-            }
+            self.inner.extend_fill(0, insert_count - remove_count);
             let shift_from = start + remove_count;
             let shift_to = start + insert_count;
             let tail_len = self.inner.len() - shift_to;
             self.inner.copy_lanes(shift_from, shift_to, tail_len);
         }
-        for i in 0..insert_count {
-            // SAFETY: `start + i < start + insert_count <= self.len()` after
-            // the resize above.
-            unsafe {
-                self.inner
-                    .set_unchecked(start + i, replacement.get_unchecked(i));
-            }
-        }
+        // The range now holds `insert_count` lanes: copy the buffered
+        // replacement over it a word at a time.
+        self.inner
+            .copy_from_packed(&replacement, 0, start, insert_count);
         CompactVec { inner: removed }
     }
 }

@@ -41,9 +41,8 @@ pub struct PackedArray<const BITS: u32> {
     // a previously written value. The two lengths are normally tight
     // (`words.len() == words_for(len)`); a lowered [`set_len`] (used by the
     // drain machinery, and left behind by a leaked drain) may leave extra
-    // trailing words holding stale lanes. Bulk word-copy fast paths check for
-    // tightness and fall back to lane-at-a-time copies, so a slack store stays
-    // fully usable.
+    // trailing words holding stale lanes. The bulk appends re-tighten the
+    // store before copying, so a slack store stays fully usable.
     /// [`set_len`]: PackedArray::set_len
     words: Vec<usize>,
     len: usize,
@@ -310,36 +309,16 @@ impl<const BITS: u32> PackedArray<BITS> {
         if other_len == 0 {
             return;
         }
-        let per = Self::items_per_word();
-        self.reserve(other_len);
-        if self.len % per == 0 && self.words.len() == Self::words_for(self.len)
-        {
-            // Word-aligned tight tail: both stores pack lanes at identical
-            // bit offsets within each word, so `other`'s packed words copy in
-            // verbatim. Only the words holding `other`'s valid lanes are
-            // copied (a leaked drain may have left `other` with extra stale
-            // words), and any stale bits beyond `other_len` in the last word
-            // land beyond `self`'s new length, so they stay invisible. No
-            // per-element `push`, so advance the length explicitly.
-            self.words
-                .extend_from_slice(&other.words[..Self::words_for(other_len)]);
-            self.len += other_len;
-        } else {
-            // Unaligned or slack tail (stale words after a leaked drain):
-            // merge element by element; `push` advances the length itself.
-            for i in 0..other_len {
-                // SAFETY: `i < other_len == other.len`.
-                self.push(unsafe { other.get_unchecked(i) });
-            }
-        }
+        self.extend_from_packed(other, 0, other_len);
         other.clear();
     }
 
     /// Append `other`'s lanes `[start, start + len)` to the end.
     ///
     /// When the destination tail and `start` are both word-aligned the packed
-    /// words are copied wholesale (a `Vec<usize>` memcpy); otherwise lanes are
-    /// copied one at a time. `other` must not alias `self`.
+    /// words are copied wholesale (a `Vec<usize>` memcpy); any other
+    /// alignment is copied a word at a time (see `copy_bits_between`).
+    /// `other` must not alias `self`.
     pub fn extend_from_packed(
         &mut self,
         other: &Self,
@@ -356,26 +335,71 @@ impl<const BITS: u32> PackedArray<BITS> {
             return;
         }
         let per = Self::items_per_word();
-        self.reserve(len);
-        if self.len % per == 0
-            && start % per == 0
-            && self.words.len() == Self::words_for(self.len)
-        {
-            // Aligned tight tail: copy whole words. The source words exist
-            // even if `other` carries stale trailing words, and stale bits
-            // past `start + len` in the last word land beyond `self`'s new
-            // length, so stay invisible.
+        let new_len = match self.len.checked_add(len) {
+            Some(new_len) => new_len,
+            None => capacity_overflow(),
+        };
+        // Drop any stale words a leaked drain left behind, so the tail word
+        // is the last word and the copies below land right after it.
+        self.words.truncate(Self::words_for(self.len));
+        if self.len % per == 0 && start % per == 0 {
+            // Both stores pack lanes at identical bit offsets within each
+            // word, so the source words copy in verbatim. Stale bits past
+            // `start + len` in the last word land beyond the new length, so
+            // they stay invisible.
             let first = start / per;
-            let nwords = Self::words_for(len);
-            self.words
-                .extend_from_slice(&other.words[first..first + nwords]);
-            self.len += len;
+            self.words.extend_from_slice(
+                &other.words[first..first + Self::words_for(len)],
+            );
         } else {
-            for i in 0..len {
-                // SAFETY: `start + i < start + len <= other.len` (asserted
-                // above).
-                self.push(unsafe { other.get_unchecked(start + i) });
+            let b = BITS as usize;
+            self.words.resize(Self::words_for(new_len), 0);
+            copy_bits_between(
+                &other.words,
+                start * b,
+                &mut self.words,
+                self.len * b,
+                len * b,
+            );
+        }
+        self.len = new_len;
+    }
+
+    /// Append every lane yielded by `lanes` (each truncated to `BITS` bits).
+    ///
+    /// Lanes are packed into a register and each completed word is stored
+    /// once, so a lane costs a shift and an or instead of the read-modify-
+    /// write of the tail word that [`push`](Self::push) performs.
+    pub fn extend_lanes<I: IntoIterator<Item = usize>>(&mut self, lanes: I) {
+        let mut lanes = lanes.into_iter();
+        let per = Self::items_per_word();
+        let mask = Self::mask();
+        self.reserve(lanes.size_hint().0);
+        // Complete the partial tail word lane by lane.
+        while self.len % per != 0 {
+            match lanes.next() {
+                Some(v) => self.push(v),
+                None => return,
             }
+        }
+        // The tail is word-aligned: drop any stale words a leaked drain left
+        // behind, so every word below is appended at `words.len()`.
+        self.words.truncate(Self::words_for(self.len));
+        let mut word = 0usize;
+        let mut filled = 0usize;
+        for v in lanes {
+            word |= (v & mask) << (filled * BITS as usize);
+            filled += 1;
+            if filled == per {
+                self.words.push(word);
+                self.len += per;
+                word = 0;
+                filled = 0;
+            }
+        }
+        if filled != 0 {
+            self.words.push(word);
+            self.len += filled;
         }
     }
 
@@ -384,42 +408,47 @@ impl<const BITS: u32> PackedArray<BITS> {
         if count == 0 {
             return;
         }
-        let per = Self::items_per_word();
-        let mask = Self::mask();
-        let v = value & mask;
-        self.reserve(count);
-        let mut filled = 0;
-        // Finish the current partial word one lane at a time.
-        while filled < count && self.len % per != 0 {
-            self.push(v);
-            filled += 1;
-        }
-        // Bulk full words: `v` replicated into every lane (mask divides
-        // usize::MAX exactly for BITS in {1,2,4}). Requires a tight store;
-        // a slack one (stale words after a leaked drain) falls through to the
-        // per-element loop below.
-        let full_words = (count - filled) / per;
-        if full_words > 0 && self.words.len() == Self::words_for(self.len) {
-            let rep = v.wrapping_mul(usize::MAX / mask);
-            self.words.resize(self.words.len() + full_words, rep);
-            self.len += full_words * per;
-            filled += full_words * per;
-        }
-        while filled < count {
-            self.push(v);
-            filled += 1;
-        }
+        let start = self.len;
+        let new_len = match start.checked_add(count) {
+            Some(new_len) => new_len,
+            None => capacity_overflow(),
+        };
+        // `resize` drops any stale words a leaked drain left behind and
+        // zero-fills the new ones; the lanes are then written at word speed.
+        self.words.resize(Self::words_for(new_len), 0);
+        self.len = new_len;
+        self.fill_range(start, count, value);
     }
 
-    /// Bit mask covering word bits `[lo, hi)`, `0 <= lo < hi <= usize::BITS`.
-    #[inline(always)]
-    fn bit_span_mask(lo: usize, hi: usize) -> usize {
-        let width = hi - lo;
-        if width == usize::BITS as usize {
-            usize::MAX
-        } else {
-            ((1usize << width) - 1) << lo
-        }
+    /// Overwrite lanes `[start, start + count)` with `other`'s lanes
+    /// `[other_start, other_start + count)`, a word at a time. `other` must
+    /// not alias `self`.
+    pub fn copy_from_packed(
+        &mut self,
+        other: &Self,
+        other_start: usize,
+        start: usize,
+        count: usize,
+    ) {
+        assert!(
+            other_start <= other.len
+                && count <= other.len - other_start
+                && start <= self.len
+                && count <= self.len - start,
+            "copy range out of bounds: the source len is {} and the range is \
+             {other_start}..{other_start}+{count}, the destination len is {} \
+             and the range is {start}..{start}+{count}",
+            other.len,
+            self.len
+        );
+        let b = BITS as usize;
+        copy_bits_between(
+            &other.words,
+            other_start * b,
+            &mut self.words,
+            start * b,
+            count * b,
+        );
     }
 
     /// Overwrite lanes `[start, start + len)` with `value` (truncated to
@@ -450,14 +479,14 @@ impl<const BITS: u32> PackedArray<BITS> {
         let word_bits = usize::BITS as usize;
         if wi == last {
             // The whole range sits in one word.
-            let m = Self::bit_span_mask(head_lo, tail_hi);
+            let m = bit_span_mask(head_lo, tail_hi);
             let w = &mut self.words[wi];
             *w = (*w & !m) | (rep & m);
             return;
         }
         if head_lo != 0 {
             // Partial head word.
-            let m = Self::bit_span_mask(head_lo, word_bits);
+            let m = bit_span_mask(head_lo, word_bits);
             let w = &mut self.words[wi];
             *w = (*w & !m) | (rep & m);
             wi += 1;
@@ -470,54 +499,9 @@ impl<const BITS: u32> PackedArray<BITS> {
         }
         if tail_hi != word_bits {
             // Partial tail word.
-            let m = Self::bit_span_mask(0, tail_hi);
+            let m = bit_span_mask(0, tail_hi);
             let w = &mut self.words[last];
             *w = (*w & !m) | (rep & m);
-        }
-    }
-
-    /// Read `n <= usize::BITS` bits starting at absolute bit position `bit`,
-    /// straddling at most two words.
-    #[inline(always)]
-    fn read_bits(words: &[usize], bit: usize, n: usize) -> usize {
-        let word_bits = usize::BITS as usize;
-        let w = bit / word_bits;
-        let r = bit % word_bits;
-        let val = if r == 0 {
-            words[w]
-        } else if r + n <= word_bits {
-            words[w] >> r
-        } else {
-            (words[w] >> r) | (words[w + 1] << (word_bits - r))
-        };
-        if n == word_bits {
-            val
-        } else {
-            val & ((1usize << n) - 1)
-        }
-    }
-
-    /// Write the low `n <= usize::BITS` bits of `val` at absolute bit
-    /// position `bit`, preserving all surrounding bits (masked
-    /// read-modify-write of at most two words).
-    #[inline(always)]
-    fn write_bits(words: &mut [usize], bit: usize, n: usize, val: usize) {
-        let word_bits = usize::BITS as usize;
-        let w = bit / word_bits;
-        let r = bit % word_bits;
-        let m = if n == word_bits {
-            usize::MAX
-        } else {
-            (1usize << n) - 1
-        };
-        let v = val & m;
-        // Bits shifted past the word boundary drop out of the low word and
-        // are re-materialized into the next word below.
-        words[w] = (words[w] & !(m << r)) | (v << r);
-        if r + n > word_bits {
-            let spill_mask = (1usize << (r + n - word_bits)) - 1;
-            words[w + 1] =
-                (words[w + 1] & !spill_mask) | (v >> (word_bits - r));
         }
     }
 
@@ -525,9 +509,9 @@ impl<const BITS: u32> PackedArray<BITS> {
     /// may overlap (memmove semantics): the copy direction follows the
     /// offsets so no lane is read after being overwritten.
     ///
-    /// Runs word-at-a-time (funnel shifts), so a shift of a long tail costs
-    /// `count / lanes_per_word` iterations instead of `count` lane
-    /// read-modify-writes.
+    /// Runs a destination word at a time (see `copy_bits_within`), so a
+    /// shift of a long tail costs `count / lanes_per_word` funnel shifts
+    /// instead of `count` lane read-modify-writes.
     pub fn copy_lanes(&mut self, src: usize, dst: usize, count: usize) {
         assert!(
             src <= self.len
@@ -538,34 +522,8 @@ impl<const BITS: u32> PackedArray<BITS> {
              {src}..{src}+{count} and {dst}..{dst}+{count}",
             self.len
         );
-        if count == 0 || src == dst {
-            return;
-        }
-        let word_bits = usize::BITS as usize;
         let b = BITS as usize;
-        let total = count * b;
-        let sbit = src * b;
-        let dbit = dst * b;
-        if dbit < sbit {
-            // Moving down: ascending chunks; each write trails every
-            // still-unread source bit.
-            let mut done = 0;
-            while done < total {
-                let n = word_bits.min(total - done);
-                let v = Self::read_bits(&self.words, sbit + done, n);
-                Self::write_bits(&mut self.words, dbit + done, n, v);
-                done += n;
-            }
-        } else {
-            // Moving up: descending chunks, symmetrically.
-            let mut left = total;
-            while left > 0 {
-                let n = word_bits.min(left);
-                left -= n;
-                let v = Self::read_bits(&self.words, sbit + left, n);
-                Self::write_bits(&mut self.words, dbit + left, n, v);
-            }
-        }
+        copy_bits_within(&mut self.words, src * b, dst * b, count * b);
     }
 
     /// Whether `self`'s lanes `[start, start + len)` equal `other`'s lanes
@@ -594,8 +552,23 @@ impl<const BITS: u32> PackedArray<BITS> {
         }
         let per = Self::items_per_word();
         if start % per != 0 || other_start % per != 0 {
-            return (0..len)
-                .all(|i| self.get(start + i) == other.get(other_start + i));
+            // Unaligned: compare up to a word's worth of bits per step,
+            // reading each side at its own offset.
+            let b = BITS as usize;
+            let word_bits = usize::BITS as usize;
+            let (sbit, obit) = (start * b, other_start * b);
+            let total = len * b;
+            let mut done = 0;
+            while done < total {
+                let n = word_bits.min(total - done);
+                if read_bits(&self.words, sbit + done, n)
+                    != read_bits(&other.words, obit + done, n)
+                {
+                    return false;
+                }
+                done += n;
+            }
+            return true;
         }
         let (sw, ow) = (start / per, other_start / per);
         let full = len / per;
@@ -613,10 +586,11 @@ impl<const BITS: u32> PackedArray<BITS> {
     /// Count elements whose stored value equals `value`, over
     /// `[start, start+len)`.
     ///
-    /// Bulk words are counted without per-element extraction; for `BITS == 1`
-    /// this is a direct `count_ones`/`count_zeros` over the packed words
-    /// (auto-vectorizable). Boundary words (at most two) fall back to
-    /// per-element extraction. Multi-bit widths count lanes within each word.
+    /// Every word is counted whole: for `BITS == 1` with a plain
+    /// `count_ones`/`count_zeros`, for wider lanes with the SWAR match in
+    /// [`count_word_in`]. The lanes of the two boundary words that fall
+    /// outside the range are first replaced by a value that cannot match, so
+    /// no lane is ever extracted on its own.
     pub fn count_in(&self, start: usize, len: usize, value: usize) -> usize {
         assert!(
             start <= self.len && len <= self.len - start,
@@ -624,31 +598,181 @@ impl<const BITS: u32> PackedArray<BITS> {
              {start}..{start}+{len}",
             self.len
         );
-        let per = Self::items_per_word();
-        let mut total = 0usize;
-        let mut idx = start;
+        if len == 0 {
+            return 0;
+        }
+        let mask = Self::mask();
+        let value = value & mask;
+        // `value ^ mask` differs from `value` in every lane; replicated into
+        // the out-of-range lanes it makes them count as misses. (`mask`
+        // divides `usize::MAX` exactly for BITS in {1, 2, 4}.)
+        let filler = (value ^ mask).wrapping_mul(usize::MAX / mask);
         let end = start + len;
-        while idx < end {
-            let wstart = (idx / per) * per;
-            let wend = wstart + per;
-            if idx == wstart && wend <= end {
-                // Full word: all lanes are valid.
-                total += count_word_in::<BITS>(self.words[wstart / per], value);
-                idx = wend;
-            } else {
-                // Partial boundary word: extract element by element.
-                let stop = wend.min(end);
-                for i in idx..stop {
-                    // SAFETY: `i < end <= self.len` (checked on entry).
-                    if unsafe { self.get_unchecked(i) } == value {
-                        total += 1;
-                    }
-                }
-                idx = stop;
-            }
+        let first = Self::word_of(start);
+        let last = Self::word_of(end - 1);
+        let head_lo = Self::offset_of(start);
+        let tail_hi = Self::offset_of(end - 1) + BITS as usize;
+        let word_bits = usize::BITS as usize;
+        if first == last {
+            let keep = bit_span_mask(head_lo, tail_hi);
+            let w = (self.words[first] & keep) | (filler & !keep);
+            return count_word_in::<BITS>(w, value);
+        }
+        let keep = bit_span_mask(head_lo, word_bits);
+        let head = (self.words[first] & keep) | (filler & !keep);
+        let keep = bit_span_mask(0, tail_hi);
+        let tail = (self.words[last] & keep) | (filler & !keep);
+        let mut total = count_word_in::<BITS>(head, value)
+            + count_word_in::<BITS>(tail, value);
+        for &w in &self.words[first + 1..last] {
+            total += count_word_in::<BITS>(w, value);
         }
         total
     }
+}
+
+/// Report a length that does not fit in `usize`, like `alloc` does.
+#[cold]
+#[inline(never)]
+fn capacity_overflow() -> ! {
+    panic!("capacity overflow")
+}
+
+/// Bit mask covering word bits `[lo, hi)`, `0 <= lo < hi <= usize::BITS`.
+#[inline(always)]
+fn bit_span_mask(lo: usize, hi: usize) -> usize {
+    let width = hi - lo;
+    if width == usize::BITS as usize {
+        usize::MAX
+    } else {
+        ((1usize << width) - 1) << lo
+    }
+}
+
+/// Read `n <= usize::BITS` bits starting at absolute bit position `bit`,
+/// straddling at most two words.
+#[inline(always)]
+fn read_bits(words: &[usize], bit: usize, n: usize) -> usize {
+    let word_bits = usize::BITS as usize;
+    let w = bit / word_bits;
+    let r = bit % word_bits;
+    let val = if r == 0 {
+        words[w]
+    } else if r + n <= word_bits {
+        words[w] >> r
+    } else {
+        (words[w] >> r) | (words[w + 1] << (word_bits - r))
+    };
+    if n == word_bits {
+        val
+    } else {
+        val & ((1usize << n) - 1)
+    }
+}
+
+/// Replace bits `[lo, hi)` of `word` with the low `hi - lo` bits of `val`.
+#[inline(always)]
+fn merge_bits(word: usize, val: usize, lo: usize, hi: usize) -> usize {
+    let m = bit_span_mask(lo, hi);
+    (word & !m) | ((val << lo) & m)
+}
+
+/// Move `nbits` bits from bit position `src` to bit position `dst` inside
+/// `words`. The ranges may overlap (memmove semantics); both must lie within
+/// the slice.
+///
+/// Works a destination word at a time: the first and last words are masked
+/// read-modify-writes, every word in between is one funnel shift of two
+/// source words stored whole. Destination words are visited in ascending
+/// order when moving down and descending order when moving up, so every
+/// write trails the source bits still to be read.
+fn copy_bits_within(words: &mut [usize], src: usize, dst: usize, nbits: usize) {
+    if nbits == 0 || src == dst {
+        return;
+    }
+    let wb = usize::BITS as usize;
+    let first = dst / wb;
+    let last = (dst + nbits - 1) / wb;
+    let lo = dst % wb;
+    let hi = (dst + nbits - 1) % wb + 1;
+    if first == last {
+        let v = read_bits(words, src, nbits);
+        words[first] = merge_bits(words[first], v, lo, hi);
+        return;
+    }
+    // Source bit position of the first bit of destination word `first + 1`;
+    // every later word's source is one word further on, so the in-word
+    // offset `r` is shared by the whole interior.
+    let s0 = src + (first + 1) * wb - dst;
+    let (j0, r) = (s0 / wb, s0 % wb);
+    let head = |words: &mut [usize]| {
+        let v = read_bits(words, src, wb - lo);
+        words[first] = merge_bits(words[first], v, lo, wb);
+    };
+    let tail = |words: &mut [usize]| {
+        let v = read_bits(words, src + nbits - hi, hi);
+        words[last] = merge_bits(words[last], v, 0, hi);
+    };
+    let middle = |words: &mut [usize], w: usize| {
+        let j = j0 + (w - first - 1);
+        words[w] = if r == 0 {
+            words[j]
+        } else {
+            (words[j] >> r) | (words[j + 1] << (wb - r))
+        };
+    };
+    if dst < src {
+        head(words);
+        for w in first + 1..last {
+            middle(words, w);
+        }
+        tail(words);
+    } else {
+        tail(words);
+        for w in (first + 1..last).rev() {
+            middle(words, w);
+        }
+        head(words);
+    }
+}
+
+/// Copy `nbits` bits from bit position `src_bit` of `src` to bit position
+/// `dst_bit` of `dst`, a destination word at a time as in
+/// [`copy_bits_within`]. Both ranges must lie within their slices.
+fn copy_bits_between(
+    src: &[usize],
+    src_bit: usize,
+    dst: &mut [usize],
+    dst_bit: usize,
+    nbits: usize,
+) {
+    if nbits == 0 {
+        return;
+    }
+    let wb = usize::BITS as usize;
+    let first = dst_bit / wb;
+    let last = (dst_bit + nbits - 1) / wb;
+    let lo = dst_bit % wb;
+    let hi = (dst_bit + nbits - 1) % wb + 1;
+    if first == last {
+        let v = read_bits(src, src_bit, nbits);
+        dst[first] = merge_bits(dst[first], v, lo, hi);
+        return;
+    }
+    let v = read_bits(src, src_bit, wb - lo);
+    dst[first] = merge_bits(dst[first], v, lo, wb);
+    let s0 = src_bit + (first + 1) * wb - dst_bit;
+    let (j0, r) = (s0 / wb, s0 % wb);
+    if r == 0 {
+        dst[first + 1..last].copy_from_slice(&src[j0..j0 + (last - first - 1)]);
+    } else {
+        for (i, w) in dst[first + 1..last].iter_mut().enumerate() {
+            let j = j0 + i;
+            *w = (src[j] >> r) | (src[j + 1] << (wb - r));
+        }
+    }
+    let v = read_bits(src, src_bit + nbits - hi, hi);
+    dst[last] = merge_bits(dst[last], v, 0, hi);
 }
 
 /// Count the lanes of a fully-valid `word` equal to `value`.
@@ -792,8 +916,19 @@ pub trait BitPack: Clone + Default + core::fmt::Debug + Sized {
     fn append(&mut self, other: &mut Self);
     /// Append `other`'s lanes `[start, start + len)` to the end.
     fn extend_from_packed(&mut self, other: &Self, start: usize, len: usize);
+    /// Append every lane yielded by `lanes`.
+    fn extend_lanes<I: IntoIterator<Item = usize>>(&mut self, lanes: I);
     /// Append `count` lanes all equal to `value`.
     fn extend_fill(&mut self, value: usize, count: usize);
+    /// Overwrite lanes `[start, start + count)` with `other`'s lanes at
+    /// `other_start`.
+    fn copy_from_packed(
+        &mut self,
+        other: &Self,
+        other_start: usize,
+        start: usize,
+        count: usize,
+    );
     /// Overwrite lanes `[start, start + len)` with `value`.
     fn fill_range(&mut self, start: usize, len: usize, value: usize);
     /// Move `count` lanes from `src` to `dst` (overlap allowed).
@@ -899,8 +1034,22 @@ impl<const BITS: u32> BitPack for PackedArray<BITS> {
         PackedArray::extend_from_packed(self, other, start, len);
     }
     #[inline]
+    fn extend_lanes<I: IntoIterator<Item = usize>>(&mut self, lanes: I) {
+        PackedArray::extend_lanes(self, lanes);
+    }
+    #[inline]
     fn extend_fill(&mut self, value: usize, count: usize) {
         PackedArray::extend_fill(self, value, count);
+    }
+    #[inline]
+    fn copy_from_packed(
+        &mut self,
+        other: &Self,
+        other_start: usize,
+        start: usize,
+        count: usize,
+    ) {
+        PackedArray::copy_from_packed(self, other, other_start, start, count);
     }
     #[inline]
     fn fill_range(&mut self, start: usize, len: usize, value: usize) {
