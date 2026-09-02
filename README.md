@@ -191,7 +191,7 @@ bits a packed column is no smaller than a plain one.
 Read and write a packed field through `get` and `set`. A `CompactVec` also
 offers `count`, which encodes the value once and scans the packed words. For
 one-bit types it lowers to `count_ones` / `count_zeros`, which LLVM turns into
-`POPCNT`: counting the active flag over 100k entities takes ~1.6 us versus
+`POPCNT`: counting the active flag over 100k entities takes ~0.3 us versus
 ~4.9 us for `Vec<bool>::iter().filter().count()`, and the column drops from
 ~97 KiB to ~12 KiB.
 
