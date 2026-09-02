@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.2 - 2026-09-02
 
 ### Performance
 
@@ -25,6 +25,11 @@
 - `CompactVec::extend` and `collect` pack lanes into a register and store
   each completed word once.
 - `pop` on a generated vector no longer re-checks emptiness per column.
+
+### Changed
+
+- `BitPack` gained `extend_lanes` and `copy_from_packed`. Only affects
+  out-of-crate implementors; `PackedArray` supplies both.
 
 ### Fixed
 
