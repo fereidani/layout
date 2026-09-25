@@ -53,11 +53,8 @@ fn ends_meet_without_overlap() {
     let mut back = Vec::new();
     // Alternate ends until the iterator is drained; every element must be
     // yielded exactly once.
-    loop {
-        match it.next() {
-            Some(r) => front.push(*r.id),
-            None => break,
-        }
+    while let Some(r) = it.next() {
+        front.push(*r.id);
         match it.next_back() {
             Some(r) => back.push(*r.id),
             None => break,
