@@ -327,9 +327,14 @@ pub use layout_internal::CompactRepr;
 // (instead of depending on the `permutation` crate) to keep this crate
 // `no_std` + `alloc` only; the `permutation` crate needs `std`.
 
-/// Reorder `slice` so that position `pos` receives the element that was at
-/// `argsort[pos]`, without validating `argsort`. Used by generated code for
-/// plain `&mut [T]` columns after one composite-level validation.
+/// Reorder the first `argsort.len()` elements of `slice` so that position
+/// `pos` receives the element that was at `argsort[pos]`, without
+/// validating `argsort`. Used by generated code for plain `&mut [T]` columns
+/// after one composite-level validation.
+///
+/// Only the prefix covered by `argsort` moves: a column may be longer than
+/// the rows of its struct-of-arrays (its public fields can be swapped by
+/// safe code), and the elements past the rows stay where they are.
 ///
 /// The elements are gathered in sorted order into a fresh buffer and copied
 /// back over the slice. The gather's loads are independent of one another,
@@ -340,27 +345,27 @@ pub use layout_internal::CompactRepr;
 ///
 /// # Safety
 ///
-/// `argsort` must be a permutation of `0..slice.len()` (equal length, every
-/// index in range, no duplicates).
+/// `argsort.len() <= slice.len()`, and `argsort` must be a permutation of
+/// `0..argsort.len()` (every index in range, no duplicates).
 #[doc(hidden)]
 pub unsafe fn __apply_argsort_unchecked<T>(slice: &mut [T], argsort: &[usize]) {
-    let len = slice.len();
-    debug_assert_eq!(argsort.len(), len);
+    let len = argsort.len();
+    debug_assert!(len <= slice.len());
     if len <= 1 || core::mem::size_of::<T>() == 0 {
         return;
     }
     let mut buffer: Vec<T> = Vec::with_capacity(len);
     let dst = buffer.as_mut_ptr();
-    let src = slice.as_ptr();
-    // SAFETY: every `s < len` per the caller's contract, so each read is in
-    // bounds; `buffer` has room for `len` elements and each position is
-    // written once, so the copy back moves every element exactly once. No
-    // operation in the block can panic.
+    let src = slice.as_mut_ptr();
+    // SAFETY: every `s < len <= slice.len()` per the caller's contract, so
+    // each read is in bounds; `buffer` has room for `len` elements and each
+    // position is written once, so the copy back moves every element of the
+    // prefix exactly once. No operation in the block can panic.
     unsafe {
         for (pos, &s) in argsort.iter().enumerate() {
             core::ptr::copy_nonoverlapping(src.add(s), dst.add(pos), 1);
         }
-        core::ptr::copy_nonoverlapping(dst, slice.as_mut_ptr(), len);
+        core::ptr::copy_nonoverlapping(dst, src, len);
     }
     // `buffer` still has length 0: dropping it only frees the allocation.
 }

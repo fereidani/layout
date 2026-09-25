@@ -127,24 +127,32 @@ pub fn derive(input: &Input) -> TokenStream {
         impl<'a> #slice_name<'a> {
             /// Similar to [`&
             #[doc = #slice_name_str]
-            /// ::len()`](https://doc.rust-lang.org/std/primitive.slice.html#method.len),
-            /// the length of all fields should be the same.
+            /// ::len()`](https://doc.rust-lang.org/std/primitive.slice.html#method.len).
+            ///
+            /// Every column holds this many elements. The columns are public,
+            /// so safe code can still build a slice whose columns differ in
+            /// length; the length is then the shortest column's, which keeps
+            /// every row access in bounds (and fails a debug assertion).
             #[inline]
             pub fn len(&self) -> usize {
-                let len = self.#first_field.len();
-                #(debug_assert_eq!(self.#fields_names.len(), len);)*
+                let mut len = self.#first_field.len();
+                #(
+                    debug_assert_eq!(
+                        self.#fields_names.len(),
+                        len,
+                        "struct-of-arrays columns have different lengths"
+                    );
+                    len = len.min(self.#fields_names.len());
+                )*
                 len
             }
 
             /// Similar to [`&
             #[doc = #slice_name_str]
-            /// ::is_empty()`](https://doc.rust-lang.org/std/primitive.slice.html#method.is_empty),
-            /// the length of all fields should be the same.
+            /// ::is_empty()`](https://doc.rust-lang.org/std/primitive.slice.html#method.is_empty).
             #[inline]
             pub fn is_empty(&self) -> bool {
-                let empty = self.#first_field.is_empty();
-                #(debug_assert_eq!(self.#fields_names.is_empty(), empty);)*
-                empty
+                self.len() == 0
             }
 
             /// Similar to [`&
@@ -510,8 +518,8 @@ pub fn derive_mut(input: &Input) -> TokenStream {
                 quote! {
                     {
                         let base = self.#ident.as_mut_ptr();
-                        // SAFETY: `a` and `b` are both `< len`, which is the
-                        // length of every column.
+                        // SAFETY: `a` and `b` are both `< len`, and no
+                        // column is shorter than `len`.
                         unsafe {
                             ::core::ptr::swap(base.add(a), base.add(b));
                         }
@@ -692,24 +700,32 @@ pub fn derive_mut(input: &Input) -> TokenStream {
 
             /// Similar to [`&
             #[doc = #slice_name_str]
-            /// ::len()`](https://doc.rust-lang.org/std/primitive.slice.html#method.len),
-            /// the length of all fields should be the same.
+            /// ::len()`](https://doc.rust-lang.org/std/primitive.slice.html#method.len).
+            ///
+            /// Every column holds this many elements. The columns are public,
+            /// so safe code can still build a slice whose columns differ in
+            /// length; the length is then the shortest column's, which keeps
+            /// every row access in bounds (and fails a debug assertion).
             #[inline]
             pub fn len(&self) -> usize {
-                let len = self.#first_field.len();
-                #(debug_assert_eq!(self.#fields_names.len(), len);)*
+                let mut len = self.#first_field.len();
+                #(
+                    debug_assert_eq!(
+                        self.#fields_names.len(),
+                        len,
+                        "struct-of-arrays columns have different lengths"
+                    );
+                    len = len.min(self.#fields_names.len());
+                )*
                 len
             }
 
             /// Similar to [`&
             #[doc = #slice_name_str]
-            /// ::is_empty()`](https://doc.rust-lang.org/std/primitive.slice.html#method.is_empty),
-            /// the length of all fields should be the same.
+            /// ::is_empty()`](https://doc.rust-lang.org/std/primitive.slice.html#method.is_empty).
             #[inline]
             pub fn is_empty(&self) -> bool {
-                let empty = self.#first_field.is_empty();
-                #(debug_assert_eq!(self.#fields_names.is_empty(), empty);)*
-                empty
+                self.len() == 0
             }
 
             /// Similar to [`&mut
@@ -936,13 +952,16 @@ pub fn derive_mut(input: &Input) -> TokenStream {
             }
 
             #[doc(hidden)]
-            /// Reorder every column so that position `pos` receives the row
-            /// that was at `argsort[pos]`, without validating `argsort`. Do
-            /// not use this method directly.
+            /// Reorder the first `argsort.len()` rows of every column so that
+            /// position `pos` receives the row that was at `argsort[pos]`,
+            /// without validating `argsort`. This is `pub` so that an
+            /// enclosing `#[nested_soa]` struct can call it. Do not use this
+            /// method directly.
             ///
             /// # Safety
             ///
-            /// `argsort` must be a permutation of `0..self.len()`.
+            /// `argsort.len() <= self.len()`, and `argsort` must be a
+            /// permutation of `0..argsort.len()`.
             pub unsafe fn __private_apply_argsort_unchecked(
                 &mut self,
                 argsort: &[usize],

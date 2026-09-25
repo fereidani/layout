@@ -1635,9 +1635,10 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
         }
     }
 
-    /// Reorder the slice so that position `pos` receives the element that
-    /// was at `argsort[pos]`, without validating `argsort`. Generated
-    /// composite sorts validate once and then call this per column.
+    /// Reorder the first `argsort.len()` lanes so that position `pos`
+    /// receives the element that was at `argsort[pos]`, without validating
+    /// `argsort`. Generated composite sorts validate once and then call this
+    /// per column; lanes past the prefix stay where they are.
     ///
     /// The lanes are gathered into a fresh store in sorted order and copied
     /// back in one word-level pass; the gather's loads are independent, so
@@ -1646,23 +1647,24 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
     ///
     /// # Safety
     ///
-    /// `argsort` must be a permutation of `0..self.len()`.
+    /// `argsort.len() <= self.len()`, and `argsort` must be a permutation of
+    /// `0..argsort.len()`.
     #[doc(hidden)]
     pub unsafe fn __private_apply_argsort_unchecked(
         &mut self,
         argsort: &[usize],
     ) {
-        let len = self.len;
-        debug_assert_eq!(argsort.len(), len);
+        let len = argsort.len();
+        debug_assert!(len <= self.len);
         if len <= 1 {
             return;
         }
         let start = self.start;
         let mut sorted = Store::<T>::with_capacity(len);
         {
-            // SAFETY: `len > 0` implies live storage, and every `src < len`
-            // per the caller's permutation contract, so every lane read is
-            // within the slice.
+            // SAFETY: `self.len >= len > 0` implies live storage, and every
+            // `src < len` per the caller's permutation contract, so every
+            // lane read is within the slice.
             let pa = unsafe { &*self.packed };
             sorted.extend_lanes(
                 argsort

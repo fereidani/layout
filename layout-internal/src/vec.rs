@@ -193,24 +193,32 @@ pub fn derive(input: &Input) -> TokenStream {
 
             /// Similar to [`
             #[doc = #vec_name_str]
-            /// ::len()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.len),
-            /// all the fields should have the same length.
+            /// ::len()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.len).
+            ///
+            /// Every column holds this many elements. The columns are public,
+            /// so safe code can still leave them with different lengths; the
+            /// length is then the shortest column's, which keeps every row
+            /// access in bounds (and fails a debug assertion).
             #[inline]
             pub fn len(&self) -> usize {
-                let len = self.#first_field.len();
-                #(debug_assert_eq!(self.#fields_names.len(), len);)*
+                let mut len = self.#first_field.len();
+                #(
+                    debug_assert_eq!(
+                        self.#fields_names.len(),
+                        len,
+                        "struct-of-arrays columns have different lengths"
+                    );
+                    len = len.min(self.#fields_names.len());
+                )*
                 len
             }
 
             /// Similar to [`
             #[doc = #vec_name_str]
-            /// ::is_empty()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.is_empty),
-            /// all the fields should have the same length.
+            /// ::is_empty()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.is_empty).
             #[inline]
             pub fn is_empty(&self) -> bool {
-                let empty = self.#first_field.is_empty();
-                #(debug_assert_eq!(self.#fields_names.is_empty(), empty);)*
-                empty
+                self.len() == 0
             }
 
             /// Similar to [`
@@ -218,6 +226,8 @@ pub fn derive(input: &Input) -> TokenStream {
             /// ::swap_remove()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.swap_remove).
             pub fn swap_remove(&mut self, index: usize) -> #name {
                 // SAFETY: the same index is swap-removed from every column.
+                // Each column checks it, so an out-of-bounds index panics
+                // at the first column, before any column changes.
                 #(
                     let #fields_names_hygienic =
                         unsafe { self.#fields_names.swap_remove(index) };
@@ -262,7 +272,8 @@ pub fn derive(input: &Input) -> TokenStream {
             #[doc = #vec_name_str]
             /// ::remove()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.remove).
             pub fn remove(&mut self, index: usize) -> #name {
-                // SAFETY: the same index is removed from every column.
+                // SAFETY: the same index is removed from every column. See
+                // `swap_remove` for the bounds check.
                 #(
                     let #fields_names_hygienic =
                         unsafe { self.#fields_names.remove(index) };
@@ -277,9 +288,9 @@ pub fn derive(input: &Input) -> TokenStream {
                 if ::layout::branches::unlikely(self.is_empty()) {
                     None
                 } else {
-                    // SAFETY: every column is popped once, and the columns
-                    // share one length that was just checked to be non-zero,
-                    // so no `pop` returns `None`.
+                    // SAFETY: every column is popped once, and every column
+                    // is at least `len()` long, which was just checked to be
+                    // non-zero, so no `pop` returns `None`.
                     #(
                         let #fields_names_hygienic = unsafe {
                             self.#fields_names.pop().unwrap_unchecked()
@@ -315,7 +326,8 @@ pub fn derive(input: &Input) -> TokenStream {
             #[doc = #vec_name_str]
             /// ::split_off()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.split_off).
             pub fn split_off(&mut self, at: usize) -> #vec_name {
-                // SAFETY: every column splits at the same index.
+                // SAFETY: every column splits at the same index. See
+                // `swap_remove` for the bounds check.
                 unsafe {
                     #vec_name {
                         #(#fields_names: self.#fields_names.split_off(at), )*

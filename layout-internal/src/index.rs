@@ -11,7 +11,6 @@ pub fn derive(input: &Input) -> TokenStream {
     let ref_mut_name = names::ref_mut_name(&input.name);
 
     let fields_names = &input.field_idents();
-    let first_field_name = &fields_names[0];
 
     let get_unchecked = input
         .map_fields_nested_or(
@@ -189,7 +188,7 @@ pub fn derive(input: &Input) -> TokenStream {
 
             #[inline]
             fn get(self, slice: #slice_name<'a>) -> Option<Self::RefOutput> {
-                if self < slice.#first_field_name.len() {
+                if self < slice.len() {
                     Some(unsafe { ::layout::SoAIndex::get_unchecked(self, slice) })
                 } else {
                     None
@@ -206,11 +205,11 @@ pub fn derive(input: &Input) -> TokenStream {
 
             #[inline]
             fn index(self, slice: #slice_name<'a>) -> Self::RefOutput {
-                let len = slice.#first_field_name.len();
+                let len = slice.len();
                 if ::layout::branches::unlikely(self >= len) {
                     ::layout::panics::index_out_of_bounds(self, len);
                 }
-                // SAFETY: `self < len` and every column has that same
+                // SAFETY: `self < len`, and `len` is the shortest column's
                 // length.
                 unsafe { ::layout::SoAIndex::get_unchecked(self, slice) }
             }
@@ -241,7 +240,7 @@ pub fn derive(input: &Input) -> TokenStream {
                 if ::layout::branches::unlikely(self >= len) {
                     ::layout::panics::index_out_of_bounds(self, len);
                 }
-                // SAFETY: `self < len` and every column has that same
+                // SAFETY: `self < len`, and `len` is the shortest column's
                 // length.
                 unsafe { ::layout::SoAIndexMut::get_unchecked_mut(self, slice) }
             }
@@ -255,7 +254,7 @@ pub fn derive(input: &Input) -> TokenStream {
 
             #[inline]
             fn get(self, slice: #slice_name<'a>) -> Option<Self::RefOutput> {
-                if self.start <= self.end && self.end <= slice.#first_field_name.len() {
+                if self.start <= self.end && self.end <= slice.len() {
                     unsafe { Some(::layout::SoAIndex::get_unchecked(self, slice)) }
                 } else {
                     None
@@ -271,15 +270,15 @@ pub fn derive(input: &Input) -> TokenStream {
 
             #[inline]
             fn index(self, slice: #slice_name<'a>) -> Self::RefOutput {
-                let len = slice.#first_field_name.len();
+                let len = slice.len();
                 if ::layout::branches::unlikely(self.start > self.end) {
                     ::layout::panics::slice_index_order_fail(self.start, self.end);
                 }
                 if ::layout::branches::unlikely(self.end > len) {
                     ::layout::panics::slice_end_index_len_fail(self.end, len);
                 }
-                // SAFETY: `start <= end <= len` and every column has that
-                // same length.
+                // SAFETY: `start <= end <= len`, and `len` is the shortest
+                // column's length.
                 unsafe { ::layout::SoAIndex::get_unchecked(self, slice) }
             }
         }
@@ -289,7 +288,7 @@ pub fn derive(input: &Input) -> TokenStream {
 
             #[inline]
             fn get_mut(self, slice: #slice_mut_name<'a>) -> Option<Self::MutOutput> {
-                if self.start <= self.end && self.end <= slice.#first_field_name.len() {
+                if self.start <= self.end && self.end <= slice.len() {
                     unsafe { Some(::layout::SoAIndexMut::get_unchecked_mut(self, slice)) }
                 } else {
                     None
@@ -305,15 +304,15 @@ pub fn derive(input: &Input) -> TokenStream {
 
             #[inline]
             fn index_mut(self, slice: #slice_mut_name<'a>) -> Self::MutOutput {
-                let len = slice.#first_field_name.len();
+                let len = slice.len();
                 if ::layout::branches::unlikely(self.start > self.end) {
                     ::layout::panics::slice_index_order_fail(self.start, self.end);
                 }
                 if ::layout::branches::unlikely(self.end > len) {
                     ::layout::panics::slice_end_index_len_fail(self.end, len);
                 }
-                // SAFETY: `start <= end <= len` and every column has that
-                // same length.
+                // SAFETY: `start <= end <= len`, and `len` is the shortest
+                // column's length.
                 unsafe { ::layout::SoAIndexMut::get_unchecked_mut(self, slice) }
             }
         }

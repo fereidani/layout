@@ -6,15 +6,20 @@
 //! exactly as on a `Vec`/slice. What it deliberately does **not** expose is any
 //! safe way to change the column's length.
 //!
-//! The soundness of a struct-of-arrays `Vec` relies on every column sharing one
-//! length: [`FooVec::get`](crate::SoAIndex) bounds-checks against a single
-//! length and then reads each column, so a shorter column would be read out of
-//! bounds. The only safe way to grow or shrink is therefore the composite
-//! `FooVec` API (`push`/`insert`/`remove`/...), which updates every column
-//! together. The per-column length operations below are `unsafe`: the generated
-//! composite methods call them inside `unsafe` blocks (where the equal-length
-//! invariant is preserved), and any other caller would have to write `unsafe`
-//! themselves to desynchronize the columns.
+//! A struct-of-arrays `Vec` keeps every column at one length: the composite
+//! `FooVec` API (`push`/`insert`/`remove`/...) updates every column together.
+//! The per-column length operations below are `unsafe` so that growing or
+//! shrinking a single column by mistake does not compile without an `unsafe`
+//! block; the generated composite methods call them for every column at
+//! once.
+//!
+//! Soundness does not rest on this, though. The columns are public fields,
+//! so safe code can still replace or swap one (`mem::take`, `mem::swap`,
+//! assignment), and nested or compact columns expose their own safe length
+//! operations. Every generated row access is therefore bounded by the
+//! shortest column: `FooVec::len` is the minimum column length, so a
+//! desynchronized vector yields unspecified rows (and fails a debug
+//! assertion), never an out-of-bounds access.
 
 use alloc::vec::Vec;
 use core::ops::{Deref, DerefMut, RangeBounds};
