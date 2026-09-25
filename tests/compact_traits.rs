@@ -203,3 +203,17 @@ fn debug_slice_mut_lists_values() {
     assert!(s.contains("true"), "got: {}", s);
     assert!(s.contains("false"), "got: {}", s);
 }
+
+// ---------------------------------------------------------------------------
+// Empty views
+// ---------------------------------------------------------------------------
+
+#[test]
+fn default_views_hash_like_empty_views() {
+    // A default view holds a dangling store pointer; hashing it must not
+    // dereference it.
+    let column: CompactVec<bool> = CompactVec::new();
+    let empty = hash_of(&column.as_slice());
+    assert_eq!(hash_of(&layout::CompactSlice::<bool>::default()), empty);
+    assert_eq!(hash_of(&layout::CompactSliceMut::<bool>::default()), empty);
+}

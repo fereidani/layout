@@ -1354,8 +1354,12 @@ impl<'a, T: CompactRepr + core::hash::Hash> core::hash::Hash
 {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         self.len.hash(state);
-        // SAFETY: `packed` is a valid `Store<T>` for the slice's lifetime, and
-        // `start + i < start + len`.
+        if self.len == 0 {
+            // An empty slice may hold a dangling `packed` (`Default`).
+            return;
+        }
+        // SAFETY: `len > 0` implies `packed` is a valid `Store<T>` for the
+        // slice's lifetime, and `start + i < start + len`.
         let a = unsafe { &*self.packed };
         for i in 0..self.len {
             a.get(self.start + i).hash(state);
@@ -1877,8 +1881,12 @@ impl<'a, T: CompactRepr + core::hash::Hash> core::hash::Hash
 {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         self.len.hash(state);
-        // SAFETY: `packed` is a valid `Store<T>` for the slice's lifetime, and
-        // `start + i < start + len`.
+        if self.len == 0 {
+            // An empty slice may hold a dangling `packed` (`Default`).
+            return;
+        }
+        // SAFETY: `len > 0` implies `packed` is a valid `Store<T>` for the
+        // slice's lifetime, and `start + i < start + len`.
         let a = unsafe { &*self.packed };
         for i in 0..self.len {
             a.get(self.start + i).hash(state);
