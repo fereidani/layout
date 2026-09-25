@@ -1748,8 +1748,8 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
     /// rewritten with word-level fills. Consequences (all documented
     /// contract):
     ///
-    /// * `f` is invoked on distinct values only (at most 120 calls), never once
-    ///   per element, so it must be a pure comparison.
+    /// * `f` is invoked on distinct values present in the slice only (at most
+    ///   120 calls), never once per element, so it must be a pure comparison.
     /// * Elements whose values compare `Equal` are grouped by their stored
     ///   value (the observable result of `slice::sort_unstable_by`), not
     ///   interleaved in their original order.
@@ -1779,13 +1779,20 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
             }
             counts[nvals - 1] = len - seen;
         }
-        // Order the value table with `f` (stable insertion sort of at most 16
-        // entries, so equal-comparing values keep ascending raw order).
+        // Order the values that occur with `f` (stable insertion sort of at
+        // most 16 entries, so equal-comparing values keep ascending raw
+        // order). Absent values are left out: for an enum whose variant
+        // count is not a power of two some raw values are not discriminants
+        // at all, and decoding one would hand `f` a made-up variant.
         let mut order = [0usize; 16];
-        for (v, slot) in order.iter_mut().enumerate().take(nvals) {
-            *slot = v;
+        let mut present = 0;
+        for (v, &c) in counts.iter().enumerate().take(nvals) {
+            if c > 0 {
+                order[present] = v;
+                present += 1;
+            }
         }
-        for i in 1..nvals {
+        for i in 1..present {
             let mut j = i;
             while j > 0
                 && f(
@@ -1802,12 +1809,9 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
         // to exactly `len`.
         let pa = unsafe { &mut *self.packed };
         let mut at = self.start;
-        for &v in order.iter().take(nvals) {
-            let c = counts[v];
-            if c > 0 {
-                pa.fill_range(at, c, v);
-                at += c;
-            }
+        for &v in &order[..present] {
+            pa.fill_range(at, counts[v], v);
+            at += counts[v];
         }
     }
 

@@ -148,3 +148,63 @@ fn fill_range_matches_oracle() {
     check::<2>();
     check::<4>();
 }
+
+/// Three variants: 2-bit lanes, so raw value 3 is not a discriminant.
+#[repr(u8)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, layout::CompactRepr,
+)]
+enum Tri {
+    A,
+    B,
+    C,
+}
+
+/// Sparse discriminants: 4-bit lanes, most raw values are not variants.
+#[repr(u8)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, layout::CompactRepr,
+)]
+enum Sparse {
+    Low = 1,
+    High = 9,
+}
+
+#[test]
+fn sort_enum_whose_variant_count_is_not_a_power_of_two() {
+    let mut v: CompactVec<Tri> = [Tri::C, Tri::A, Tri::B, Tri::A, Tri::C]
+        .iter()
+        .map(|&t| Compact::new(t))
+        .collect();
+    v.as_mut_slice().sort();
+    let got: Vec<Tri> = v.iter().map(|c| c.0).collect();
+    assert_eq!(got, [Tri::A, Tri::A, Tri::B, Tri::C, Tri::C]);
+
+    v.as_mut_slice().sort_by(|a, b| b.0.cmp(&a.0));
+    let got: Vec<Tri> = v.iter().map(|c| c.0).collect();
+    assert_eq!(got, [Tri::C, Tri::C, Tri::B, Tri::A, Tri::A]);
+}
+
+#[test]
+fn sort_enum_with_sparse_discriminants() {
+    let mut v: CompactVec<Sparse> = [Sparse::High, Sparse::Low, Sparse::High]
+        .iter()
+        .map(|&s| Compact::new(s))
+        .collect();
+    v.as_mut_slice().sort_by_key(|s| s.0);
+    let got: Vec<Sparse> = v.iter().map(|c| c.0).collect();
+    assert_eq!(got, [Sparse::Low, Sparse::High, Sparse::High]);
+}
+
+#[test]
+fn sort_compares_present_values_only() {
+    let mut v = kinds(&[Kind::D, Kind::B, Kind::D, Kind::B]);
+    let mut seen = Vec::new();
+    v.as_mut_slice().sort_by(|a, b| {
+        seen.push((a.0, b.0));
+        a.0.cmp(&b.0)
+    });
+    assert_eq!(seen, [(Kind::B, Kind::D)]);
+    let got: Vec<Kind> = v.iter().map(|c| c.0).collect();
+    assert_eq!(got, [Kind::B, Kind::B, Kind::D, Kind::D]);
+}
