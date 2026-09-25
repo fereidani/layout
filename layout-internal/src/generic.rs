@@ -164,9 +164,7 @@ pub fn derive_slice_mut(input: &Input) -> TokenStream {
 
             #[inline]
             fn apply_index(&mut self, indices: &[usize]) {
-                // The returned scratch bitmap is only needed by the cycle
-                // walk; the gather below works from `indices` directly.
-                let _ = ::layout::__validate_permutation(indices, self.len());
+                ::layout::__validate_permutation(indices, self.len());
                 // SAFETY: `indices` was just validated as a permutation of
                 // `0..len`.
                 unsafe {

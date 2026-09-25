@@ -323,29 +323,9 @@ pub use cursor::{ColumnCursor, ColumnCursorMut};
 /// `#[derive(CompactRepr)]` and `impl CompactRepr` both resolve at the
 /// crate root.
 pub use layout_internal::CompactRepr;
-// Sorting helpers used by the macro-generated code. Inlining the inverse
-// permutation here (instead of depending on the `permutation` crate) keeps
-// this crate `no_std` + `alloc` only — the `permutation` crate needs `std`.
-#[doc(hidden)]
-pub fn __invert_permutation(argsort: &[usize]) -> Vec<usize> {
-    // `dest[src]` = the sorted position of the element currently at `src`.
-    // `argsort[pos] = src`, so invert by assigning `dest[argsort[pos]] = pos`.
-    // `usize::MAX` doubles as the "not yet assigned" sentinel: a slice of
-    // `usize::MAX` elements cannot exist, so no valid position collides with
-    // it. Rejecting out-of-range and duplicate sources here guarantees the
-    // returned `dest` is a genuine permutation of `0..argsort.len()`.
-    let len = argsort.len();
-    let mut dest = alloc::vec![usize::MAX; len];
-    for (pos, &src) in argsort.iter().enumerate() {
-        assert!(src < len, "index {src} out of bounds for length {len}");
-        assert!(
-            dest[src] == usize::MAX,
-            "duplicate index {src}: indices must form a permutation"
-        );
-        dest[src] = pos;
-    }
-    dest
-}
+// Sorting helpers used by the macro-generated code. They are written here
+// (instead of depending on the `permutation` crate) to keep this crate
+// `no_std` + `alloc` only; the `permutation` crate needs `std`.
 
 /// Reorder `slice` so that position `pos` receives the element that was at
 /// `argsort[pos]`, without validating `argsort`. Used by generated code for
@@ -353,11 +333,10 @@ pub fn __invert_permutation(argsort: &[usize]) -> Vec<usize> {
 ///
 /// The elements are gathered in sorted order into a fresh buffer and copied
 /// back over the slice. The gather's loads are independent of one another,
-/// so both passes stream, where the in-place cycle walk of
-/// [`__apply_permutation_inplace_unchecked`] chases one dependent cache miss
-/// per element. Elements are moved bitwise, so `T` need not be `Copy`; the
-/// buffer never owns them (its length stays 0), so no element can be
-/// dropped twice.
+/// so both passes stream, where an in-place cycle walk chases one dependent
+/// cache miss per element. Elements are moved bitwise, so `T` need not be
+/// `Copy`; the buffer never owns them (its length stays 0), so no element
+/// can be dropped twice.
 ///
 /// # Safety
 ///
@@ -386,142 +365,31 @@ pub unsafe fn __apply_argsort_unchecked<T>(slice: &mut [T], argsort: &[usize]) {
     // `buffer` still has length 0: dropping it only frees the allocation.
 }
 
-/// A bit-packed visited set for the in-place permutation walkers: 8x smaller
-/// than a `Vec<bool>`, so the random-access cycle walk touches fewer cache
-/// lines. Public (hidden) so generated code can allocate one scratch set and
-/// reuse it across every column of a sort.
+/// Validate that `indices` is a permutation of `0..len`: matching length,
+/// every index in range, no duplicates. Panics otherwise.
+///
+/// The unchecked gathers `ptr::read` elements out of the columns, so every
+/// precondition must hold before any of them starts.
 #[doc(hidden)]
-pub struct VisitedBits {
-    words: Vec<usize>,
-}
-
-impl VisitedBits {
+pub fn __validate_permutation(indices: &[usize], len: usize) {
     const W: usize = usize::BITS as usize;
-
-    #[inline]
-    pub fn new(len: usize) -> Self {
-        // `div_ceil` is not available at the crate's MSRV (1.71).
-        Self {
-            words: alloc::vec![0usize; (len + Self::W - 1) / Self::W],
-        }
-    }
-
-    #[inline]
-    pub fn test(&self, i: usize) -> bool {
-        (self.words[i / Self::W] >> (i % Self::W)) & 1 != 0
-    }
-
-    #[inline]
-    pub fn set(&mut self, i: usize) {
-        self.words[i / Self::W] |= 1 << (i % Self::W);
-    }
-
-    #[inline]
-    pub fn clear(&mut self) {
-        self.words.fill(0);
-    }
-}
-
-/// Validate that `dest` is a permutation of `0..len`: matching length, every
-/// index in range, no duplicates. Panics otherwise. Returns the (fully set)
-/// visited bitmap so the caller can reuse the allocation as cycle-walk
-/// scratch for every column.
-#[doc(hidden)]
-pub fn __validate_permutation(dest: &[usize], len: usize) -> VisitedBits {
-    // The unchecked cycle-walks `ptr::read` elements out of the columns, so
-    // every precondition must hold *before* any of them starts: a
-    // wrong-length or non-permutation `dest` would otherwise panic mid-cycle
-    // while a bitwise duplicate of a non-`Copy` element is live (double drop
-    // on unwind), or walk a cycle that never closes.
     assert!(
-        dest.len() == len,
+        indices.len() == len,
         "permutation length {} does not match slice length {len}",
-        dest.len()
+        indices.len()
     );
-    let mut visited = VisitedBits::new(len);
-    for &d in dest {
-        assert!(d < len, "index {d} out of bounds for length {len}");
+    // A bit-packed seen set: 8x smaller than a `Vec<bool>`, so the random
+    // accesses touch fewer cache lines. `div_ceil` is not available at the
+    // crate's MSRV (1.71).
+    let mut seen = alloc::vec![0usize; (len + W - 1) / W];
+    for &i in indices {
+        assert!(i < len, "index {i} out of bounds for length {len}");
+        let (word, bit) = (&mut seen[i / W], 1usize << (i % W));
         assert!(
-            !visited.test(d),
-            "duplicate index {d}: indices must form a permutation"
+            *word & bit == 0,
+            "duplicate index {i}: indices must form a permutation"
         );
-        visited.set(d);
-    }
-    visited
-}
-
-/// Invert an argsort into a destination permutation without validating it:
-/// `argsort[pos] = src` becomes `dest[src] = pos`. The caller must pass a
-/// reordered `0..len` sequence (as produced by sorting a collected range);
-/// out-of-range sources panic on the (checked) `dest` write.
-#[doc(hidden)]
-pub fn __argsort_to_dest(argsort: &[usize]) -> Vec<usize> {
-    let mut dest = alloc::vec![0usize; argsort.len()];
-    for (pos, &src) in argsort.iter().enumerate() {
-        dest[src] = pos;
-    }
-    dest
-}
-
-/// As [`__argsort_to_dest`], reading the source index from the second slot
-/// of pre-computed `(key, index)` pairs.
-#[doc(hidden)]
-pub fn __keyed_to_dest<K>(keyed: &[(K, usize)]) -> Vec<usize> {
-    let mut dest = alloc::vec![0usize; keyed.len()];
-    for (pos, (_, src)) in keyed.iter().enumerate() {
-        dest[*src] = pos;
-    }
-    dest
-}
-
-/// Apply a destination permutation in place without re-validating it:
-/// `dest[i]` is the index the element at `i` should move to. Follows each
-/// cycle moving values (works for non-`Copy` `T`).
-///
-/// Current generated code sorts through [`__apply_argsort_unchecked`], which
-/// gathers instead of walking cycles; this entry point stays for code
-/// generated by earlier macro versions.
-///
-/// # Safety
-///
-/// `dest` must be a permutation of `0..slice.len()` (equal length, every
-/// index in range, no duplicates) and `visited` must have been created with
-/// capacity for at least `slice.len()` bits. A non-permutation `dest` walks
-/// out of bounds or duplicates non-`Copy` elements.
-#[doc(hidden)]
-pub unsafe fn __apply_permutation_inplace_unchecked<T>(
-    slice: &mut [T],
-    dest: &[usize],
-    visited: &mut VisitedBits,
-) {
-    let len = slice.len();
-    visited.clear();
-    let base = slice.as_mut_ptr();
-    for start in 0..len {
-        if visited.test(start) {
-            continue;
-        }
-        visited.set(start);
-        let mut current = start;
-        // SAFETY: `current` walks the cycle start -> dest[start] -> ...; every
-        // index is visited exactly once and is `< len` per the caller's
-        // permutation contract. `temp` always holds the value that belongs at
-        // the next slot; we move it in and keep the displaced value, closing
-        // the cycle by writing into `start` when we return to it. No panic
-        // can occur inside this block, so no slot is left uninitialized.
-        unsafe {
-            let mut temp = core::ptr::read(base.add(start));
-            loop {
-                let next = *dest.get_unchecked(current);
-                if next == start {
-                    core::ptr::write(base.add(start), temp);
-                    break;
-                }
-                temp = core::ptr::replace(base.add(next), temp);
-                visited.set(next);
-                current = next;
-            }
-        }
+        *word |= bit;
     }
 }
 

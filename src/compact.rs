@@ -1635,61 +1635,6 @@ impl<'a, T: CompactRepr> CompactSliceMut<'a, T> {
         }
     }
 
-    pub fn __private_apply_permutation(&mut self, dest: &[usize]) {
-        let mut visited = crate::__validate_permutation(dest, self.len);
-        // SAFETY: `dest` was just validated as a permutation of `0..len`.
-        unsafe {
-            self.__private_apply_permutation_unchecked(dest, &mut visited)
-        }
-    }
-
-    /// Apply a destination permutation without re-validating it, reusing the
-    /// caller's scratch bitmap. Generated composite sorts validate once and
-    /// then call this per column.
-    ///
-    /// # Safety
-    ///
-    /// `dest` must be a permutation of `0..self.len()` and `visited` must
-    /// have been created with capacity for at least `self.len()` bits.
-    #[doc(hidden)]
-    pub unsafe fn __private_apply_permutation_unchecked(
-        &mut self,
-        dest: &[usize],
-        visited: &mut crate::VisitedBits,
-    ) {
-        let len = self.len;
-        visited.clear();
-        // SAFETY: every index in `dest` is `< len` per the caller's
-        // permutation contract, so `self.start + i` stays within the slice's
-        // live backing storage.
-        unsafe {
-            let pa = &mut *self.packed;
-            for start in 0..len {
-                if visited.test(start) {
-                    continue;
-                }
-                // `dest` maps each current index to its destination index.
-                // Rotate each cycle into place using a single saved value so no
-                // element is lost.
-                visited.set(start);
-                let mut temp = pa.get_unchecked(self.start + start);
-                let mut current = start;
-                loop {
-                    let next = *dest.get_unchecked(current);
-                    if next == start {
-                        pa.set_unchecked(self.start + start, temp);
-                        break;
-                    }
-                    let saved = pa.get_unchecked(self.start + next);
-                    pa.set_unchecked(self.start + next, temp);
-                    temp = saved;
-                    visited.set(next);
-                    current = next;
-                }
-            }
-        }
-    }
-
     /// Reorder the slice so that position `pos` receives the element that
     /// was at `argsort[pos]`, without validating `argsort`. Generated
     /// composite sorts validate once and then call this per column.

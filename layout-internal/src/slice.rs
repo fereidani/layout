@@ -600,13 +600,6 @@ pub fn derive_mut(input: &Input) -> TokenStream {
         .collect::<Vec<_>>();
     nested_ord.push(quote! { for<'b> #ref_name<'b>: Ord });
 
-    let apply_permutation_unchecked = input
-        .map_fields_nested_or(
-            |ident, _, _| quote! { self.#ident.__private_apply_permutation_unchecked(dest, visited) },
-            |ident, _| quote! { ::layout::__apply_permutation_inplace_unchecked(&mut self.#ident, dest, visited) },
-        )
-        .collect::<Vec<_>>();
-
     let apply_argsort_unchecked = input
         .map_fields_nested_or(
             |ident, _, _| quote! { self.#ident.__private_apply_argsort_unchecked(argsort) },
@@ -940,35 +933,6 @@ pub fn derive_mut(input: &Input) -> TokenStream {
                 #slice_mut_name {
                     #( #fields_names: #slice_from_raw_parts_mut, )*
                 }
-            }
-
-            #[doc(hidden)]
-            /// This is `pub` due to there will be compile-error if `#[nested_soa]` is used.
-            /// Do not use this method directly.
-            pub fn __private_apply_permutation(&mut self, dest: &[usize]) {
-                let mut visited = ::layout::__validate_permutation(dest, self.len());
-                // SAFETY: `dest` was just validated as a permutation of
-                // `0..len`.
-                unsafe {
-                    self.__private_apply_permutation_unchecked(&dest, &mut visited);
-                }
-            }
-
-            #[doc(hidden)]
-            /// Apply a destination permutation to every column without
-            /// re-validating it per column. Do not use this method directly.
-            ///
-            /// # Safety
-            ///
-            /// `dest` must be a permutation of `0..self.len()` and `visited`
-            /// must have been created with capacity for at least `self.len()`
-            /// bits.
-            pub unsafe fn __private_apply_permutation_unchecked(
-                &mut self,
-                dest: &[usize],
-                visited: &mut ::layout::VisitedBits,
-            ) {
-                #( #apply_permutation_unchecked; )*
             }
 
             #[doc(hidden)]
