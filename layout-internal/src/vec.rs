@@ -700,10 +700,18 @@ pub fn derive(input: &Input) -> TokenStream {
                 #[doc = #vec_name_str]
                 /// ::resize()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.resize).
                 pub fn resize(&mut self, new_len: usize, value: #name) {
-                    // SAFETY: every column is resized to the same length.
+                    // ManuallyDrop: fields are read out via ptr::read (which
+                    // also allows a `Drop` struct), so an unwind cannot drop
+                    // a field twice.
+                    let value = ::core::mem::ManuallyDrop::new(value);
+                    // SAFETY: every column is resized to the same length, and
+                    // each field of `value` is read out exactly once.
                     unsafe {
                         #(
-                            self.#fields_names.resize(new_len, value.#fields_names);
+                            self.#fields_names.resize(
+                                new_len,
+                                ::core::ptr::read(&value.#fields_names),
+                            );
                         )*
                     }
                 }
