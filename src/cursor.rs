@@ -69,6 +69,21 @@ impl<'a, T> SoACursor for ColumnCursor<'a, T> {
         // SAFETY: as in `cursor_next`.
         unsafe { &*current }
     }
+
+    #[inline(always)]
+    unsafe fn cursor_advance(&mut self, n: usize) {
+        // SAFETY: the caller guarantees `n` unyielded elements remain, so
+        // the pointer stays within the column, or one past its end.
+        self.front =
+            unsafe { NonNull::new_unchecked(self.front.as_ptr().add(n)) };
+    }
+
+    #[inline(always)]
+    unsafe fn cursor_advance_back(&mut self, n: usize) {
+        // SAFETY: as in `cursor_advance`, from the back end.
+        self.back =
+            unsafe { NonNull::new_unchecked(self.back.as_ptr().sub(n)) };
+    }
 }
 
 impl<T> Clone for ColumnCursor<'_, T> {
@@ -132,6 +147,20 @@ impl<'a, T> SoACursor for ColumnCursorMut<'a, T> {
         self.back = unsafe { NonNull::new_unchecked(current) };
         // SAFETY: as in `cursor_next`.
         unsafe { &mut *current }
+    }
+
+    #[inline(always)]
+    unsafe fn cursor_advance(&mut self, n: usize) {
+        // SAFETY: as in `ColumnCursor::cursor_advance`.
+        self.front =
+            unsafe { NonNull::new_unchecked(self.front.as_ptr().add(n)) };
+    }
+
+    #[inline(always)]
+    unsafe fn cursor_advance_back(&mut self, n: usize) {
+        // SAFETY: as in `ColumnCursor::cursor_advance_back`.
+        self.back =
+            unsafe { NonNull::new_unchecked(self.back.as_ptr().sub(n)) };
     }
 }
 

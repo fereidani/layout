@@ -2377,6 +2377,17 @@ impl<'a, T: CompactRepr> crate::SoACursor for CompactIter<'a, T> {
         // SAFETY: as in `cursor_next`.
         unsafe { self.read_back() }
     }
+    #[inline(always)]
+    unsafe fn cursor_advance(&mut self, n: usize) {
+        // Jump the cursor and invalidate the shifted word cache. Stepping
+        // instead would reload (and bounds-check) a word per word crossed.
+        self.pos += n;
+        self.avail = 0;
+    }
+    #[inline(always)]
+    unsafe fn cursor_advance_back(&mut self, n: usize) {
+        self.end -= n;
+    }
 }
 
 pub struct CompactIterMut<'a, T: CompactRepr> {
@@ -2439,6 +2450,14 @@ impl<'a, T: CompactRepr> crate::SoACursor for CompactIterMut<'a, T> {
         self.end -= 1;
         // SAFETY: as in `cursor_next`.
         unsafe { CompactRefMut::from_packed_ptr(self.packed, self.end) }
+    }
+    #[inline(always)]
+    unsafe fn cursor_advance(&mut self, n: usize) {
+        self.pos += n;
+    }
+    #[inline(always)]
+    unsafe fn cursor_advance_back(&mut self, n: usize) {
+        self.end -= n;
     }
 }
 

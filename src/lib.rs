@@ -478,6 +478,34 @@ pub trait SoACursor {
     /// # Safety
     /// As [`cursor_next`](Self::cursor_next).
     unsafe fn cursor_next_back(&mut self) -> Self::Item;
+
+    /// Skip `n` front elements without yielding them.
+    ///
+    /// Overridden wherever skipping is cheaper than stepping: a generated
+    /// iterator's `nth` must not cost `n` steps of a bit-packed column.
+    ///
+    /// # Safety
+    /// As [`cursor_next`](Self::cursor_next), counting the `n` skipped
+    /// elements as yielded.
+    #[inline]
+    unsafe fn cursor_advance(&mut self, n: usize) {
+        for _ in 0..n {
+            // SAFETY: forwarded caller contract.
+            unsafe { self.cursor_next() };
+        }
+    }
+
+    /// Skip `n` back elements without yielding them.
+    ///
+    /// # Safety
+    /// As [`cursor_advance`](Self::cursor_advance).
+    #[inline]
+    unsafe fn cursor_advance_back(&mut self, n: usize) {
+        for _ in 0..n {
+            // SAFETY: forwarded caller contract.
+            unsafe { self.cursor_next_back() };
+        }
+    }
 }
 
 impl<'a, T> SoACursor for core::slice::Iter<'a, T> {

@@ -107,6 +107,28 @@ pub fn derive(input: &Input) -> TokenStream {
             fn count(self) -> usize {
                 self.#rem
             }
+
+            #[inline]
+            fn nth(&mut self, n: usize) -> Option<#ref_name<'a>> {
+                if n >= self.#rem {
+                    self.#rem = 0;
+                    return None;
+                }
+                self.#rem -= n;
+                // SAFETY: `n < rem`, so every column cursor has more than
+                // `n` front elements left. Skipping moves each cursor in
+                // one step; the default `nth` would step a bit-packed
+                // column once per skipped element.
+                unsafe {
+                    #( ::layout::SoACursor::cursor_advance(&mut self.#fields_names, n); )*
+                }
+                self.next()
+            }
+
+            #[inline]
+            fn last(mut self) -> Option<#ref_name<'a>> {
+                self.next_back()
+            }
         }
 
         impl<'a> DoubleEndedIterator for #iter_name<'a> {
@@ -123,6 +145,20 @@ pub fn derive(input: &Input) -> TokenStream {
                         #ref_marker_init
                     })
                 }
+            }
+
+            #[inline]
+            fn nth_back(&mut self, n: usize) -> Option<#ref_name<'a>> {
+                if n >= self.#rem {
+                    self.#rem = 0;
+                    return None;
+                }
+                self.#rem -= n;
+                // SAFETY: as in `nth`, for the back end.
+                unsafe {
+                    #( ::layout::SoACursor::cursor_advance_back(&mut self.#fields_names, n); )*
+                }
+                self.next_back()
             }
         }
 
@@ -158,6 +194,22 @@ pub fn derive(input: &Input) -> TokenStream {
                         #( #fields_names: ::layout::SoACursor::cursor_next_back(&mut self.#fields_names), )*
                         #ref_marker_init
                     }
+                }
+            }
+
+            #[inline(always)]
+            unsafe fn cursor_advance(&mut self, n: usize) {
+                // SAFETY: forwarded caller contract.
+                unsafe {
+                    #( ::layout::SoACursor::cursor_advance(&mut self.#fields_names, n); )*
+                }
+            }
+
+            #[inline(always)]
+            unsafe fn cursor_advance_back(&mut self, n: usize) {
+                // SAFETY: forwarded caller contract.
+                unsafe {
+                    #( ::layout::SoACursor::cursor_advance_back(&mut self.#fields_names, n); )*
                 }
             }
         }
@@ -233,6 +285,28 @@ pub fn derive(input: &Input) -> TokenStream {
             fn count(self) -> usize {
                 self.#rem
             }
+
+            #[inline]
+            fn nth(&mut self, n: usize) -> Option<#ref_mut_name<'a>> {
+                if n >= self.#rem {
+                    self.#rem = 0;
+                    return None;
+                }
+                self.#rem -= n;
+                // SAFETY: `n < rem`, so every column cursor has more than
+                // `n` front elements left. Skipping moves each cursor in
+                // one step; the default `nth` would step a bit-packed
+                // column once per skipped element.
+                unsafe {
+                    #( ::layout::SoACursor::cursor_advance(&mut self.#fields_names, n); )*
+                }
+                self.next()
+            }
+
+            #[inline]
+            fn last(mut self) -> Option<#ref_mut_name<'a>> {
+                self.next_back()
+            }
         }
 
         impl<'a> DoubleEndedIterator for #iter_mut_name<'a> {
@@ -248,6 +322,20 @@ pub fn derive(input: &Input) -> TokenStream {
                         #( #fields_names: ::layout::SoACursor::cursor_next_back(&mut self.#fields_names), )*
                     })
                 }
+            }
+
+            #[inline]
+            fn nth_back(&mut self, n: usize) -> Option<#ref_mut_name<'a>> {
+                if n >= self.#rem {
+                    self.#rem = 0;
+                    return None;
+                }
+                self.#rem -= n;
+                // SAFETY: as in `nth`, for the back end.
+                unsafe {
+                    #( ::layout::SoACursor::cursor_advance_back(&mut self.#fields_names, n); )*
+                }
+                self.next_back()
             }
         }
 
@@ -280,6 +368,22 @@ pub fn derive(input: &Input) -> TokenStream {
                     #ref_mut_name {
                         #( #fields_names: ::layout::SoACursor::cursor_next_back(&mut self.#fields_names), )*
                     }
+                }
+            }
+
+            #[inline(always)]
+            unsafe fn cursor_advance(&mut self, n: usize) {
+                // SAFETY: forwarded caller contract.
+                unsafe {
+                    #( ::layout::SoACursor::cursor_advance(&mut self.#fields_names, n); )*
+                }
+            }
+
+            #[inline(always)]
+            unsafe fn cursor_advance_back(&mut self, n: usize) {
+                // SAFETY: forwarded caller contract.
+                unsafe {
+                    #( ::layout::SoACursor::cursor_advance_back(&mut self.#fields_names, n); )*
                 }
             }
         }
