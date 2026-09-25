@@ -1,5 +1,58 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Safe code could make row access read out of bounds by leaving the
+  columns of a generated vector or slice with different lengths: the
+  columns are public, so a column can be swapped or replaced, a nested or
+  compact column can `push`/`pop`/`clear` on its own, a slice can be built
+  from mismatched fields, and `Deserialize` accepts mismatched columns.
+  The length is now the shortest column's, so every row access stays in
+  bounds; debug builds still assert that the lengths match.
+- A panicking `Clone` in `resize` / `extend_from_slice`, or a panicking
+  `Drop` in `truncate` / `clear`, left the columns with different lengths.
+  The columns are now cut back to whole rows while unwinding.
+- `drain` asked its `RangeBounds` for the range once per column, so a range
+  that answers differently on each call drained the columns unevenly. It
+  now resolves the range once.
+- Hashing an empty default `CompactSlice` or `CompactSliceMut` dereferenced
+  a dangling pointer.
+- Sorting a compact column of an enum whose variant count is not a power
+  of two panicked in debug builds: the counting sort decoded raw values
+  that are not discriminants. The comparator now only sees values present
+  in the slice.
+- Indexing with an exhausted `RangeInclusive` returned one row instead of
+  an empty slice.
+- `#[layout(Clone)]` on a struct that implements `Drop` failed to compile.
+- The derive relied on names in scope at the call site: a `#[nested_soa]`
+  field needed `SOA` imported, and a local module named `layout` broke the
+  generated paths.
+- `#[soa_impl]` on `impl path::Type` took the first path segment as the
+  type name.
+- `CompactVec` deserialization preallocated whatever length the input
+  claimed; the preallocation is now capped, as serde does for `Vec`.
+
+### Performance
+
+- Generated iterators implement `nth`, `nth_back` and `last` by moving
+  every column cursor at once. With a bit-packed column, `skip` and
+  `step_by` stepped every skipped row; `step_by(8)` is now about 4x faster.
+- A bit-packed column in a generated iterator reads each lane straight from
+  its word. A loop that never reads the compact field now drops it and can
+  vectorize (a sum over a struct with an unread `Compact<bool>` is 6x to 8x
+  faster), and loops that do read it are about 2.5x faster.
+
+### Changed
+
+- `BitPack` gained `word_unchecked`, with a default that forwards to
+  `word`.
+- The generated `drain` no longer requires `R: Clone`.
+- Removed the hidden in-place permutation helpers that no generated code
+  calls since sorts gather instead (`layout_internal` is pinned to the
+  exact matching version).
+
 ## 0.2.2 - 2026-09-02
 
 ### Performance
