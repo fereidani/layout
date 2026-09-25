@@ -32,14 +32,14 @@ pub fn derive(input: &Input) -> TokenStream {
 
     let iter_fields_types = input
         .map_fields_nested_or(
-            |_, field_type, _| quote! { <#field_type as layout::SoAIter<'a>>::Iter },
+            |_, field_type, _| quote! { <#field_type as ::layout::SoAIter<'a>>::Iter },
             |_, field_type| quote! { ::layout::ColumnCursor<'a, #field_type> },
         )
         .collect::<Vec<_>>();
 
     let iter_mut_fields_types = input
         .map_fields_nested_or(
-            |_, field_type, _| quote! { <#field_type as layout::SoAIter<'a>>::IterMut },
+            |_, field_type, _| quote! { <#field_type as ::layout::SoAIter<'a>>::IterMut },
             |_, field_type| quote! { ::layout::ColumnCursorMut<'a, #field_type> },
         )
         .collect::<Vec<_>>();
@@ -323,7 +323,7 @@ pub fn derive(input: &Input) -> TokenStream {
             }
         }
 
-        impl<'a> layout::SoAIter<'a> for #name {
+        impl<'a> ::layout::SoAIter<'a> for #name {
             type Ref = #ref_name<'a>;
             type RefMut = #ref_mut_name<'a>;
             type Iter = #iter_name<'a>;

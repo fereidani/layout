@@ -36,7 +36,7 @@ pub fn derive(input: &Input) -> TokenStream {
 
     let vec_with_capacity = input
         .map_fields_nested_or(
-            |_, field_type, _| quote! { <#field_type as SOA>::Type::with_capacity(capacity) },
+            |_, field_type, _| quote! { <#field_type as ::layout::SOA>::Type::with_capacity(capacity) },
             |_, _| quote! { ::layout::Column::with_capacity(capacity) },
         )
         .collect::<Vec<_>>();

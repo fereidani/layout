@@ -52,7 +52,7 @@ fn derive_trait(input: &Input) -> TokenStream {
     let vec_name = names::vec_name(name);
 
     quote! {
-        impl layout::SOA for #name {
+        impl ::layout::SOA for #name {
             type Type = #vec_name;
         }
     }
