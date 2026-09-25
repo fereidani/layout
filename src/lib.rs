@@ -370,6 +370,45 @@ pub unsafe fn __apply_argsort_unchecked<T>(slice: &mut [T], argsort: &[usize]) {
     // `buffer` still has length 0: dropping it only frees the allocation.
 }
 
+/// Resolve `start`/`end` bounds against `len` into a checked `start..end`,
+/// panicking exactly where slice indexing with the same range would.
+///
+/// Generated `drain` resolves its range once through this and hands the
+/// same concrete range to every column, so a `RangeBounds` impl that
+/// answers differently on each call cannot drain the columns unevenly.
+#[doc(hidden)]
+#[track_caller]
+pub fn __resolve_range(
+    start: core::ops::Bound<&usize>,
+    end: core::ops::Bound<&usize>,
+    len: usize,
+) -> core::ops::Range<usize> {
+    use core::ops::Bound;
+    let start = match start {
+        Bound::Included(&i) => i,
+        Bound::Excluded(&i) => match i.checked_add(1) {
+            Some(i) => i,
+            None => panics::slice_start_index_overflow_fail(),
+        },
+        Bound::Unbounded => 0,
+    };
+    let end = match end {
+        Bound::Included(&i) => match i.checked_add(1) {
+            Some(i) => i,
+            None => panics::slice_end_index_overflow_fail(),
+        },
+        Bound::Excluded(&i) => i,
+        Bound::Unbounded => len,
+    };
+    if start > end {
+        panics::slice_index_order_fail(start, end);
+    }
+    if end > len {
+        panics::slice_end_index_len_fail(end, len);
+    }
+    start..end
+}
+
 /// Validate that `indices` is a permutation of `0..len`: matching length,
 /// every index in range, no duplicates. Panics otherwise.
 ///

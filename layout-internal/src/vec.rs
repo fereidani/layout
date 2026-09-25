@@ -655,8 +655,17 @@ pub fn derive(input: &Input) -> TokenStream {
             /// Similar to [`
             #[doc = #vec_name_str]
             /// ::drain()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.drain).
-            pub fn drain<R: ::core::ops::RangeBounds<usize> + Clone>(&mut self, range: R) -> #drain_name<'_> {
-                // SAFETY: every column drains the same range.
+            pub fn drain<R: ::core::ops::RangeBounds<usize>>(&mut self, range: R) -> #drain_name<'_> {
+                // Resolve the bounds once: a `RangeBounds` impl may answer
+                // differently on each call, and every column must drain the
+                // same rows.
+                let range = ::layout::__resolve_range(
+                    ::core::ops::RangeBounds::start_bound(&range),
+                    ::core::ops::RangeBounds::end_bound(&range),
+                    self.len(),
+                );
+                // SAFETY: every column drains the same range, which is in
+                // bounds of every column.
                 unsafe {
                     #drain_name {
                         #( #fields_names: self.#fields_names.drain(range.clone()), )*

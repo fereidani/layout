@@ -6,6 +6,7 @@
 
 use std::{
     cell::Cell,
+    ops::{Bound, RangeBounds},
     panic::{catch_unwind, AssertUnwindSafe},
     rc::Rc,
 };
@@ -140,4 +141,47 @@ fn clear_keeps_columns_equal_when_drop_panics() {
     assert!(v.payload.is_empty());
     assert!(v.id.is_empty());
     assert_eq!(drops.get(), 3);
+}
+
+/// Answers `..0` to its first `end_bound` call and `..` afterwards.
+#[derive(Clone)]
+struct Fickle<'a>(&'a Cell<usize>);
+
+impl RangeBounds<usize> for Fickle<'_> {
+    fn start_bound(&self) -> Bound<&usize> {
+        Bound::Unbounded
+    }
+
+    fn end_bound(&self) -> Bound<&usize> {
+        let calls = self.0.get();
+        self.0.set(calls + 1);
+        if calls == 0 {
+            Bound::Excluded(&0)
+        } else {
+            Bound::Unbounded
+        }
+    }
+}
+
+#[test]
+fn drain_resolves_the_range_once() {
+    let mut v = ClonedVec::new();
+    for i in 0..4 {
+        v.push(cloned(i, false));
+    }
+    let calls = Cell::new(0);
+    assert_eq!(v.drain(Fickle(&calls)).count(), 0);
+    assert_eq!(v.len(), 4);
+    assert_whole_rows(&v);
+}
+
+#[test]
+fn drain_rejects_an_overflowing_inclusive_end() {
+    let mut v = ClonedVec::new();
+    v.push(cloned(0, false));
+    let r = catch_unwind(AssertUnwindSafe(|| {
+        v.drain(..=usize::MAX).count();
+    }));
+    assert!(r.is_err());
+    assert_eq!(v.len(), 1);
 }

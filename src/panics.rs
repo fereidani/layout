@@ -37,6 +37,22 @@ pub fn slice_end_index_len_fail(end: usize, len: usize) -> ! {
     )
 }
 
+/// Report an inclusive range end of `usize::MAX`.
+#[cold]
+#[inline(never)]
+#[track_caller]
+pub fn slice_end_index_overflow_fail() -> ! {
+    panic!("attempted to index slice up to maximum usize")
+}
+
+/// Report an exclusive range start of `usize::MAX`.
+#[cold]
+#[inline(never)]
+#[track_caller]
+pub fn slice_start_index_overflow_fail() -> ! {
+    panic!("attempted to index slice from after maximum usize")
+}
+
 /// Report an out-of-bounds insertion index.
 #[cold]
 #[inline(never)]
