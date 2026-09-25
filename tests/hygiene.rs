@@ -21,6 +21,13 @@ mod shapes {
         pub center: Point,
         pub mass: f32,
     }
+
+    #[::layout::soa_impl]
+    impl self::Point {
+        pub fn norm2(&self) -> f32 {
+            self.x * self.x + self.y * self.y
+        }
+    }
 }
 
 #[test]
@@ -31,4 +38,5 @@ fn derive_by_path_without_imports() {
         mass: 1.0,
     });
     assert_eq!(bodies.len(), 1);
+    assert_eq!(bodies.center.index(0).norm2(), 25.0);
 }

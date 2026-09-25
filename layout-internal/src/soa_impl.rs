@@ -35,7 +35,7 @@ fn extract_struct_ident(item_impl: &syn::ItemImpl) -> syn::Ident {
         type_path
             .path
             .segments
-            .first()
+            .last()
             .expect("expected a type name")
             .ident
             .clone()
