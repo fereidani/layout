@@ -88,6 +88,9 @@ pub fn derive(input: &Input) -> TokenStream {
     // `retain` and `retain_mut` share one compaction loop (`__retain_rows`);
     // they differ only in the row handle handed to the predicate.
     let retain_guard_name = quote::format_ident!("{}RetainGuard", name);
+    // Restores equal column lengths when a column operation unwinds halfway
+    // through the columns (a panicking `Clone` or `Drop`).
+    let resync_guard_name = quote::format_ident!("{}ResyncGuard", name);
 
     let set_len_fields = input
         .map_fields_nested_or(
@@ -174,6 +177,23 @@ pub fn derive(input: &Input) -> TokenStream {
             /// ::truncate()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.truncate)
             /// truncating all fields.
             pub fn truncate(&mut self, len: usize) {
+                // A panicking destructor stops the columns partway; the
+                // guard then truncates the rest.
+                let guard = #resync_guard_name(self);
+                // SAFETY: every column is truncated to the same length.
+                unsafe {
+                    #(guard.0.#fields_names.truncate(len);)*
+                }
+                ::core::mem::forget(guard);
+            }
+
+            /// Truncate every column to the shortest one, restoring equal
+            /// column lengths. Do not use this method directly.
+            #[doc(hidden)]
+            #[cold]
+            pub fn __resync(&mut self) {
+                let mut len = usize::MAX;
+                #(len = len.min(self.#fields_names.len());)*
                 // SAFETY: every column is truncated to the same length.
                 unsafe {
                     #(self.#fields_names.truncate(len);)*
@@ -316,10 +336,13 @@ pub fn derive(input: &Input) -> TokenStream {
             #[doc = #vec_name_str]
             /// ::clear()`](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.clear).
             pub fn clear(&mut self) {
+                // See `truncate`.
+                let guard = #resync_guard_name(self);
                 // SAFETY: every column is cleared.
                 unsafe {
-                    #(self.#fields_names.clear();)*
+                    #(guard.0.#fields_names.clear();)*
                 }
+                ::core::mem::forget(guard);
             }
 
             /// Similar to [`
@@ -502,6 +525,19 @@ pub fn derive(input: &Input) -> TokenStream {
             /// First hole: every row below it is kept.
             write: usize,
             original_len: usize,
+        }
+
+        /// Panic guard of the operations that change every column's length
+        /// one column after another: runs only when a column operation
+        /// unwinds, and truncates every column to the shortest.
+        #[doc(hidden)]
+        struct #resync_guard_name<'a>(&'a mut #vec_name);
+
+        impl Drop for #resync_guard_name<'_> {
+            #[cold]
+            fn drop(&mut self) {
+                self.0.__resync();
+            }
         }
 
         impl Drop for #retain_guard_name<'_> {
@@ -704,27 +740,34 @@ pub fn derive(input: &Input) -> TokenStream {
                     // also allows a `Drop` struct), so an unwind cannot drop
                     // a field twice.
                     let value = ::core::mem::ManuallyDrop::new(value);
+                    // A panicking `Clone` stops the columns partway; the
+                    // guard then truncates every column back to the shortest.
+                    let guard = #resync_guard_name(self);
                     // SAFETY: every column is resized to the same length, and
                     // each field of `value` is read out exactly once.
                     unsafe {
                         #(
-                            self.#fields_names.resize(
+                            guard.0.#fields_names.resize(
                                 new_len,
                                 ::core::ptr::read(&value.#fields_names),
                             );
                         )*
                     }
+                    ::core::mem::forget(guard);
                 }
             }
 
             impl ::layout::SoAAppendVec<#name> for #vec_name {
                 fn extend_from_slice(&mut self, other: Self::Slice<'_>) {
+                    // See `resize`.
+                    let guard = #resync_guard_name(self);
                     // SAFETY: every column extends from its sibling slice.
                     unsafe {
                         #(
-                            self.#fields_names.extend_from_slice(other.#fields_names);
+                            guard.0.#fields_names.extend_from_slice(other.#fields_names);
                         )*
                     }
+                    ::core::mem::forget(guard);
                 }
             }
         });
