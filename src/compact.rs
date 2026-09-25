@@ -2253,9 +2253,11 @@ impl<'a, T: CompactRepr> CompactIter<'a, T> {
         let per = (usize::BITS / T::BITS) as usize;
         if self.avail == 0 {
             let off = self.pos % per;
-            // SAFETY: `pos < end <= len`, so the word is live.
-            self.cur_word = unsafe { (*self.packed).word(self.pos / per) }
-                >> (off * T::BITS as usize);
+            // SAFETY: `pos < end <= len`, so the store is live and the
+            // lane's word is allocated.
+            self.cur_word =
+                unsafe { (*self.packed).word_unchecked(self.pos / per) }
+                    >> (off * T::BITS as usize);
             self.avail = per - off;
         }
         let raw = self.cur_word & ((1usize << T::BITS) - 1);
@@ -2273,10 +2275,22 @@ impl<'a, T: CompactRepr> CompactIter<'a, T> {
     #[inline]
     unsafe fn read_back(&mut self) -> Compact<T> {
         self.end -= 1;
-        let per = (usize::BITS / T::BITS) as usize;
-        let off = (self.end % per) * T::BITS as usize;
         // SAFETY: `end` was within the live storage.
-        let word = unsafe { (*self.packed).word(self.end / per) };
+        unsafe { self.read_at(self.end) }
+    }
+
+    /// Read lane `i` straight from its word, bypassing the forward cache.
+    ///
+    /// # Safety
+    ///
+    /// Lane `i` must be within the live storage.
+    #[inline(always)]
+    unsafe fn read_at(&self, i: usize) -> Compact<T> {
+        let per = (usize::BITS / T::BITS) as usize;
+        let off = (i % per) * T::BITS as usize;
+        // SAFETY: the lane is within the live storage, so its word is
+        // allocated.
+        let word = unsafe { (*self.packed).word_unchecked(i / per) };
         Compact(T::decode((word >> off) & ((1usize << T::BITS) - 1)))
     }
 }
@@ -2337,9 +2351,11 @@ impl<'a, T: CompactRepr> Iterator for CompactIter<'a, T> {
         while self.pos < self.end {
             let off = self.pos % per;
             let in_word = (per - off).min(self.end - self.pos);
-            // SAFETY: `pos < end <= len`, so the word is live.
-            let mut w = unsafe { (*self.packed).word(self.pos / per) }
-                >> (off * T::BITS as usize);
+            // SAFETY: `pos < end <= len`, so the store is live and the
+            // lane's word is allocated.
+            let mut w =
+                unsafe { (*self.packed).word_unchecked(self.pos / per) }
+                    >> (off * T::BITS as usize);
             for _ in 0..in_word {
                 acc = f(acc, Compact(T::decode(w & mask)));
                 w >>= T::BITS;
@@ -2368,9 +2384,15 @@ impl<'a, T: CompactRepr> crate::SoACursor for CompactIter<'a, T> {
     type Item = Compact<T>;
     #[inline(always)]
     unsafe fn cursor_next(&mut self) -> Compact<T> {
+        // Driven by a generated iterator, one lane per row. Each lane is
+        // read straight from its word: with no cache state carried from row
+        // to row, a loop that never reads this column drops it entirely.
+        let i = self.pos;
+        self.pos += 1;
+        self.avail = 0;
         // SAFETY: the caller's length contract replaces the `pos < end`
         // check.
-        unsafe { self.read_front() }
+        unsafe { self.read_at(i) }
     }
     #[inline(always)]
     unsafe fn cursor_next_back(&mut self) -> Compact<T> {

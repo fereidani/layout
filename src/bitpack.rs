@@ -897,6 +897,19 @@ pub trait BitPack: Clone + Default + core::fmt::Debug + Sized {
     unsafe fn get_unchecked(&self, index: usize) -> usize;
     /// Raw packed word at word-index `index` (for word-at-a-time reads).
     fn word(&self, index: usize) -> usize;
+    /// Raw packed word at word-index `index`, without bounds checking.
+    ///
+    /// A column iterator reads through this: an unchecked load is dead code
+    /// whenever the loop never uses the column's values, so the column's
+    /// cursor vanishes from the loop, where a bounds check would keep it.
+    ///
+    /// # Safety
+    /// The word must be allocated; callers guarantee it by reading only the
+    /// words of lanes below `len()`.
+    #[inline]
+    unsafe fn word_unchecked(&self, index: usize) -> usize {
+        self.word(index)
+    }
     /// Write `value` to the element at `index`.
     fn set(&mut self, index: usize, value: usize);
     /// Write `value` to the element at `index` without bounds checking.
@@ -1003,6 +1016,12 @@ impl<const BITS: u32> BitPack for PackedArray<BITS> {
     fn word(&self, index: usize) -> usize {
         debug_assert!(index < self.words.len());
         self.words[index]
+    }
+    #[inline(always)]
+    unsafe fn word_unchecked(&self, index: usize) -> usize {
+        debug_assert!(index < self.words.len());
+        // SAFETY: the caller guarantees the word is allocated.
+        unsafe { *self.words.get_unchecked(index) }
     }
     #[inline]
     fn set(&mut self, index: usize, value: usize) {
