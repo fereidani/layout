@@ -134,3 +134,29 @@ fn included_end_out_of_bounds_panics_slice() {
         (Bound::Unbounded, Bound::Included(10usize)),
     );
 }
+
+/// `0..=0` after yielding its only element: empty, but not reversed.
+fn exhausted() -> core::ops::RangeInclusive<usize> {
+    let mut r = 0..=0;
+    assert_eq!(r.next(), Some(0));
+    assert!(r.is_empty());
+    r
+}
+
+#[test]
+fn exhausted_inclusive_range_is_empty_like_a_slice() {
+    let std_len = [0u8; 5][exhausted()].len();
+    assert_eq!(std_len, 0);
+
+    let mut v = filled();
+    assert_eq!(v.get(exhausted()).map(|s| s.len()), Some(0));
+    assert_eq!(v.index(exhausted()).len(), 0);
+    assert_eq!(v.get_mut(exhausted()).map(|s| s.len()), Some(0));
+    assert_eq!(v.as_slice().get(exhausted()).map(|s| s.len()), Some(0));
+    assert_eq!(v.as_mut_slice().index_mut(exhausted()).len(), 0);
+    // A reversed but unexhausted range still fails like a slice's.
+    #[allow(clippy::reversed_empty_ranges)]
+    let reversed = 3..=1;
+    assert!([0u8; 5].get(reversed.clone()).is_none());
+    assert!(v.get(reversed).is_none());
+}

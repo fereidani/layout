@@ -57,3 +57,14 @@ fn splice_inclusive_end_within_bounds() {
     assert_eq!(removed.len(), 2);
     assert_eq!(v.len(), 7);
 }
+
+#[test]
+fn exhausted_inclusive_range_is_empty() {
+    let mut r = 1..=1;
+    assert_eq!(r.next(), Some(1));
+    let mut v = bv(4);
+    let got = layout::SoAIndex::get(r.clone(), v.as_slice());
+    assert_eq!(got.map(|s| s.len()), Some(0));
+    let got = layout::SoAIndexMut::get_mut(r, v.as_mut_slice());
+    assert_eq!(got.map(|s| s.len()), Some(0));
+}

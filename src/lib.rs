@@ -409,6 +409,25 @@ pub fn __resolve_range(
     start..end
 }
 
+/// Convert an inclusive range into the equivalent exclusive one the way
+/// slice indexing does: an exhausted range (iterated to its end) is empty.
+/// An end of `usize::MAX` saturates, so callers that must reject it check
+/// it first.
+#[doc(hidden)]
+#[inline]
+pub fn __inclusive_to_exclusive(
+    range: &core::ops::RangeInclusive<usize>,
+) -> core::ops::Range<usize> {
+    let (start, end) = (*range.start(), *range.end());
+    let exclusive_end = end.saturating_add(1);
+    // `is_empty` with `start <= end` holds for an exhausted range only.
+    if start <= end && range.is_empty() {
+        exclusive_end..exclusive_end
+    } else {
+        start..exclusive_end
+    }
+}
+
 /// Validate that `indices` is a permutation of `0..len`: matching length,
 /// every index in range, no duplicates. Panics otherwise.
 ///

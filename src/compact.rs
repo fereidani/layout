@@ -2961,7 +2961,7 @@ forward_range_index!(core::ops::RangeFrom<usize>, |self_, s| self_.start
 
 forward_range_index!(
     core::ops::RangeInclusive<usize>,
-    |self_, s| *self_.start()..self_.end().saturating_add(1),
+    |self_, s| crate::__inclusive_to_exclusive(&self_),
     none_if * self_.end() == usize::MAX
 );
 

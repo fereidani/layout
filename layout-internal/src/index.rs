@@ -478,7 +478,8 @@ impl Target {
             ),
             (
                 quote! { ::core::ops::RangeInclusive<usize> },
-                quote! { *self.start()..self.end().saturating_add(1) },
+                // An exhausted range is empty, as for slices.
+                quote! { ::layout::__inclusive_to_exclusive(&self) },
                 // `usize::MAX` has no exclusive-end equivalent.
                 Some(quote! { *self.end() == usize::MAX }),
             ),
