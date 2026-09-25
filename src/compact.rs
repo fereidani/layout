@@ -1024,8 +1024,12 @@ impl<'de, T: CompactRepr + serde::Deserialize<'de>> serde::Deserialize<'de>
                 self,
                 mut seq: A,
             ) -> Result<Self::Value, A::Error> {
+                // The hint comes from the input: cap the preallocation, as
+                // serde does for `Vec`, so a forged length cannot request a
+                // huge allocation up front.
+                const MAX_PREALLOC_LANES: usize = 1 << 20;
                 let mut v = CompactVec::<T>::with_capacity(
-                    seq.size_hint().unwrap_or(0),
+                    seq.size_hint().unwrap_or(0).min(MAX_PREALLOC_LANES),
                 );
                 while let Some(elem) = seq.next_element::<T>()? {
                     v.push(Compact(elem));
